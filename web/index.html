@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IPTV-Hub · 自建直播源服务</title>
+<link rel="stylesheet" href="static/style.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>📡 IPTV-Hub</h1>
+    <span class="sub">深度探测 · 稳定性评分 · 按需订阅</span>
+    <span class="spacer"></span>
+    <span class="sub" id="generatedAt">—</span>
+    <button id="refreshBtn">刷新</button>
+  </header>
+
+  <section class="tiles">
+    <div class="tile"><div class="label">频道数</div><div class="value" id="tChannels">—</div></div>
+    <div class="tile"><div class="label">可用源 / 总源</div><div class="value" id="tStreams">—</div></div>
+    <div class="tile"><div class="label">平均首包延迟</div><div class="value" id="tLatency">—<small>ms</small></div></div>
+    <div class="tile"><div class="label">平均实测吞吐</div><div class="value" id="tKbps">—<small>kbps</small></div></div>
+    <div class="tile"><div class="label">上次更新</div><div class="value" id="tRun" style="font-size:15px">—</div></div>
+  </section>
+
+  <section class="panel">
+    <div class="controls">
+      <input type="search" id="q" placeholder="搜索频道名，例如 CCTV5、湖南卫视、纪录">
+      <select id="quality">
+        <option value="0">全部画质</option>
+        <option value="1080">仅 1080p+</option>
+        <option value="720">仅 720p+</option>
+      </select>
+      <select id="ipv">
+        <option value="0">IPv4 / IPv6</option>
+        <option value="4">仅 IPv4</option>
+        <option value="6">仅 IPv6</option>
+      </select>
+      <select id="minScore">
+        <option value="0">全部评分</option>
+        <option value="0.5">评分 ≥ 0.5</option>
+        <option value="0.7">评分 ≥ 0.7</option>
+      </select>
+      <label class="check"><input type="checkbox" id="backups"> 订阅包含备用源</label>
+    </div>
+
+    <div class="chips" id="groupChips"></div>
+
+    <div class="sub-url">
+      <code id="subUrl">—</code>
+      <button class="primary" id="copySub">复制订阅链接</button>
+      <button id="openSub">下载 M3U</button>
+    </div>
+  </section>
+
+  <section class="panel" style="padding:0 14px">
+    <div id="loading" class="loading">正在加载频道数据…</div>
+    <div id="empty" class="empty" style="display:none">没有符合条件的频道</div>
+    <table id="table" style="display:none">
+      <thead>
+        <tr>
+          <th style="width:46px">#</th>
+          <th style="width:56px" class="hide-sm">台标</th>
+          <th data-sort="name">频道</th>
+          <th data-sort="group" class="hide-sm">分组</th>
+          <th data-sort="height" class="hide-sm">画质</th>
+          <th data-sort="kbps" class="hide-sm">码率</th>
+          <th data-sort="ttfb_ms" class="hide-sm">延迟</th>
+          <th data-sort="uptime" class="hide-sm">可用率</th>
+          <th data-sort="score">评分</th>
+          <th style="width:150px">操作</th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div class="empty" id="more" style="display:none"></div>
+  </section>
+
+  <footer>
+    <div>订阅地址：<code>/playlist.m3u</code> · <code>/playlist.m3u8</code> · <code>/playlist.txt</code> · <code>/playlist.json</code>（支持 group / q / ipv / min_height / min_score / limit / backups 参数）</div>
+    <div>本服务仅聚合互联网公开链接并做可用性检测，不生产、不存储、不篡改任何媒体内容；请遵守当地法律法规，仅限个人学习测试使用。</div>
+  </footer>
+</div>
+
+<div class="modal" id="modal">
+  <div class="box">
+    <header>
+      <h3 id="modalTitle">播放预览</h3>
+      <button id="modalClose">关闭</button>
+    </header>
+    <div class="body">
+      <video id="player" controls playsinline></video>
+      <div class="stream-list" id="streamList"></div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<script src="static/app.js"></script>
+</body>
+</html>

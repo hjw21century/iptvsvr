@@ -1,0 +1,157 @@
+{
+  "_comment": "上游公开源清单。type: m3u | txt | auto(按扩展名推断)。enabled=false 可临时停用；note 说明停用原因。weight 影响评分中的来源加权。",
+  "sources": [
+    {
+      "name": "fmml_itv",
+      "url": "https://m3u.ibert.me/txt/fmml_itv.txt",
+      "type": "txt",
+      "enabled": true,
+      "weight": 1.1
+    },
+    {
+      "name": "ycl_iptv",
+      "url": "https://m3u.ibert.me/ycl_iptv.m3u",
+      "type": "m3u",
+      "enabled": false,
+      "weight": 1.0,
+      "note": "rtp:// 组播源，仅限运营商内网"
+    },
+    {
+      "name": "vbskycn_ipv4",
+      "url": "https://raw.githubusercontent.com/vbskycn/iptv/master/tv/iptv4.m3u",
+      "type": "m3u",
+      "enabled": true,
+      "weight": 1.1
+    },
+    {
+      "name": "suxuang_ipv4",
+      "url": "https://raw.githubusercontent.com/suxuang/myIPTV/main/ipv4.m3u",
+      "type": "m3u",
+      "enabled": true,
+      "weight": 1.1
+    },
+    {
+      "name": "yuechan_live",
+      "url": "https://raw.githubusercontent.com/YueChan/Live/main/IPTV.m3u",
+      "type": "m3u",
+      "enabled": false,
+      "weight": 1.0,
+      "note": "rtp:// 组播源，仅限运营商内网"
+    },
+    {
+      "name": "kimentanm_aptv",
+      "url": "https://raw.githubusercontent.com/Kimentanm/aptv/master/m3u/iptv.m3u",
+      "type": "m3u",
+      "enabled": true,
+      "weight": 1.0
+    },
+    {
+      "name": "burningc4",
+      "url": "https://raw.githubusercontent.com/BurningC4/Chinese-IPTV/master/TV-IPV4.m3u",
+      "type": "m3u",
+      "enabled": true,
+      "weight": 0.9
+    },
+    {
+      "name": "zwc456baby",
+      "url": "https://raw.githubusercontent.com/zwc456baby/iptv_alive/master/live.m3u",
+      "type": "m3u",
+      "enabled": true,
+      "weight": 0.9
+    },
+    {
+      "name": "hujingguang_cn",
+      "url": "https://raw.githubusercontent.com/hujingguang/ChinaIPTV/main/cnTV_AutoUpdate.m3u8",
+      "type": "m3u",
+      "enabled": true,
+      "weight": 0.9
+    },
+    {
+      "name": "fanmingming_v6",
+      "url": "https://raw.githubusercontent.com/fanmingming/live/main/tv/m3u/ipv6.m3u",
+      "type": "m3u",
+      "enabled": true,
+      "weight": 1.0
+    },
+    {
+      "name": "iptv_org_cn",
+      "url": "https://iptv-org.github.io/iptv/countries/cn.m3u",
+      "type": "m3u",
+      "enabled": true,
+      "weight": 0.8
+    },
+    {
+      "name": "iptv_org_hk",
+      "url": "https://iptv-org.github.io/iptv/countries/hk.m3u",
+      "type": "m3u",
+      "enabled": true,
+      "weight": 0.8
+    },
+    {
+      "name": "iptv_org_tw",
+      "url": "https://iptv-org.github.io/iptv/countries/tw.m3u",
+      "type": "m3u",
+      "enabled": true,
+      "weight": 0.8
+    },
+    {
+      "name": "live_zbds",
+      "url": "https://live.zbds.org/tv/iptv4.m3u",
+      "type": "m3u",
+      "enabled": false,
+      "weight": 0.8,
+      "note": "域名当前无法解析"
+    },
+    {
+      "name": "live_kilvn",
+      "url": "https://live.kilvn.com/iptv.m3u",
+      "type": "m3u",
+      "enabled": false,
+      "weight": 0.8,
+      "note": "域名当前无法解析"
+    },
+    {
+      "name": "tv_iill_gather",
+      "url": "https://tv.iill.top/m3u/Gather",
+      "type": "m3u",
+      "enabled": false,
+      "weight": 0.8,
+      "note": "域名当前无法解析"
+    },
+    {
+      "name": "tzdr",
+      "url": "https://tzdr.com/iptv.txt",
+      "type": "txt",
+      "enabled": false,
+      "weight": 0.6
+    },
+    {
+      "name": "guovin_result",
+      "url": "https://raw.githubusercontent.com/Guovin/iptv-api/gd/output/result.m3u",
+      "type": "m3u",
+      "enabled": true,
+      "weight": 1.1
+    },
+    {
+      "name": "yang1989_gather",
+      "url": "https://raw.githubusercontent.com/YanG-1989/m3u/main/Gather.m3u",
+      "type": "m3u",
+      "enabled": true,
+      "weight": 1.0
+    },
+    {
+      "name": "iptv_org_mo",
+      "url": "https://iptv-org.github.io/iptv/countries/mo.m3u",
+      "type": "m3u",
+      "enabled": true,
+      "weight": 0.8
+    },
+    {
+      "name": "iptv_org_zho",
+      "url": "https://iptv-org.github.io/iptv/languages/zho.m3u",
+      "type": "m3u",
+      "enabled": true,
+      "weight": 0.8
+    }
+  ]
+}

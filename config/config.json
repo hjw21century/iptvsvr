@@ -1,0 +1,40 @@
+{
+  "_comment": "IPTV-Hub 运行配置。所有字段均可修改；未列出的字段使用 iptvhub/config.py 中的默认值。",
+  "epg_url": "https://live.fanmingming.cn/e.xml",
+  "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+  "fetch_timeout": 15,
+  "fetch_max_bytes": 12582912,
+  "concurrency": 48,
+  "per_host_concurrency": 4,
+  "connect_timeout": 6,
+  "probe_timeout": 14,
+  "probe_bytes": 262144,
+  "probe_seconds": 4.0,
+  "min_bytes": 16384,
+  "manifest_max_bytes": 1048576,
+  "probe_retries": 0,
+  "host_failure_limit": 8,
+  "ewma_alpha": 0.4,
+  "prune_after_days": 7,
+  "prune_fail_streak": 8,
+  "recheck_dead_after_hours": 12,
+  "max_backups_per_channel": 3,
+  "max_per_host_per_channel": 1,
+  "min_score": 0.15,
+  "weights": {
+    "stability": 0.45,
+    "speed": 0.25,
+    "quality": 0.2,
+    "latency": 0.1,
+    "https_bonus": 0.03,
+    "ipv4_bonus": 0.02
+  },
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8088,
+    "admin_token": "",
+    "auto_update": true,
+    "update_interval_hours": 4
+  },
+  "site_url": "https://iptv.tomeleaf.com"
+}

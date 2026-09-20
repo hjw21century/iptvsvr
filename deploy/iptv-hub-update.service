@@ -1,0 +1,10 @@
+[Unit]
+Description=IPTV-Hub 单次更新任务（采集 / 探测 / 评分 / 导出）
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/data/code/iptv
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 -m iptvhub run
+TimeoutStartSec=3600

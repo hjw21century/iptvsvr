@@ -1,0 +1,59 @@
+# 可选：用 GitHub Actions 跑更新并发布到 Pages（无自有服务器时的替代方案）
+name: Update playlists
+
+on:
+  schedule:
+    - cron: '0 */4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: iptv-update
+  cancel-in-progress: false
+
+env:
+  TZ: Asia/Shanghai
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # 保留上一轮的探测历史，稳定性评分才有意义
+      - name: Restore database
+        uses: actions/cache@v4
+        with:
+          path: data/iptv.db
+          key: iptv-db-${{ github.run_id }}
+          restore-keys: iptv-db-
+
+      - name: Run pipeline
+        run: python -m iptvhub -v run
+
+      - name: Build static site
+        run: python -m iptvhub static --out public
+
+      - name: Commit playlists
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          mkdir -p dist
+          cp data/playlist.m3u data/playlist.m3u8 data/playlist.txt data/channels.json dist/
+          git add -f dist
+          git diff --cached --quiet || git commit -m "自动更新: $(date +'%Y-%m-%d %H:%M:%S %Z')"
+          git push
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+      - uses: actions/deploy-pages@v4

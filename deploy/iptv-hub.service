@@ -1,0 +1,22 @@
+[Unit]
+Description=IPTV-Hub 直播源服务（API + 网页 + 播放列表）
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/data/code/iptv
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 -m iptvhub serve
+Restart=always
+RestartSec=5
+# 内置定时更新已包含在 serve 中；若改用 timer 更新，请在 config.json 里关闭 auto_update
+StandardOutput=journal
+StandardError=journal
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=yes
+
+[Install]
+WantedBy=multi-user.target
