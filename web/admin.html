@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>IPTV-Hub 管理后台</title>
+<link rel="stylesheet" href="static/style.css">
+</head>
+<body>
+<div class="wrap wide">
+  <header class="top">
+    <h1>⚙️ IPTV-Hub 管理后台</h1>
+    <span class="sub" id="serverTime">—</span>
+    <span class="spacer"></span>
+    <a href="/" target="_blank">前台页面 ↗</a>
+    <button id="lockBtn" title="清除本地保存的令牌">退出</button>
+  </header>
+
+  <nav class="tabs" id="tabs">
+    <button class="tab active" data-tab="overview">概览与运行</button>
+    <button class="tab" data-tab="sources">上游源</button>
+    <button class="tab" data-tab="streams">源明细排查</button>
+    <button class="tab" data-tab="settings">参数</button>
+  </nav>
+
+  <!-- ------------------------------------------------ 概览 -->
+  <section class="tabpage" id="page-overview">
+    <div class="tiles">
+      <div class="tile"><div class="label">频道</div><div class="value" id="tChannels">—</div></div>
+      <div class="tile"><div class="label">可用源 / 总源</div><div class="value" id="tStreams">—</div></div>
+      <div class="tile"><div class="label">平均首包延迟</div><div class="value" id="tLatency">—</div></div>
+      <div class="tile"><div class="label">平均实测吞吐</div><div class="value" id="tKbps">—</div></div>
+      <div class="tile"><div class="label">数据版本</div><div class="value sm" id="tVersion">—</div></div>
+      <div class="tile"><div class="label">自动更新</div><div class="value sm" id="tAuto">—</div></div>
+    </div>
+
+    <div class="panel">
+      <div class="controls">
+        <button class="primary" data-run="normal">开始更新</button>
+        <button data-run="recheck">全量重测（忽略冷却）</button>
+        <button data-run="collect">仅采集不探测</button>
+        <button data-run="limit">抽样探测 200 条</button>
+        <span class="spacer"></span>
+        <button data-act="export">重新评分并导出</button>
+        <button data-act="prune">清理失效源</button>
+      </div>
+      <div class="progress-box" id="progressBox">
+        <div class="progress"><i id="progressBar" style="width:0%"></i></div>
+        <div class="progress-meta">
+          <span id="progressPhase">空闲</span>
+          <span id="progressCount"></span>
+          <span id="progressElapsed"></span>
+        </div>
+      </div>
+      <pre class="logs" id="logs">等待日志…</pre>
+    </div>
+
+    <div class="cols">
+      <div class="panel">
+        <h3>最近运行</h3>
+        <table class="compact"><thead><tr>
+          <th>#</th><th>开始</th><th>候选</th><th>探测</th><th>可用</th><th>频道</th><th>备注</th>
+        </tr></thead><tbody id="runsBody"></tbody></table>
+      </div>
+      <div class="panel">
+        <h3>失败原因分布</h3>
+        <table class="compact"><thead><tr><th>错误</th><th>数量</th><th></th></tr></thead>
+          <tbody id="errorsBody"></tbody></table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------ 上游源 -->
+  <section class="tabpage hidden" id="page-sources">
+    <div class="panel">
+      <div class="controls">
+        <button class="primary" id="saveSources">保存源清单</button>
+        <button id="addSource">+ 新增源</button>
+        <span class="sub" id="sourcesHint">修改后需点击保存；下一轮更新生效。</span>
+      </div>
+      <table id="sourcesTable"><thead><tr>
+        <th style="width:52px">启用</th><th style="width:150px">名称</th>
+        <th>地址</th><th style="width:78px">类型</th><th style="width:70px">权重</th>
+        <th style="width:110px">候选/可用</th><th style="width:150px">操作</th>
+      </tr></thead><tbody id="sourcesBody"></tbody></table>
+      <pre class="logs sm hidden" id="sourceTestOut"></pre>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------ 源明细 -->
+  <section class="tabpage hidden" id="page-streams">
+    <div class="panel">
+      <div class="controls">
+        <input type="search" id="sQ" placeholder="频道名 / 主机 / URL 关键词">
+        <select id="sGroup"><option value="">全部分组</option></select>
+        <select id="sAlive">
+          <option value="">全部状态</option><option value="1">仅可用</option><option value="0">仅失效</option>
+        </select>
+        <select id="sError"><option value="">全部错误</option></select>
+        <select id="sOrder">
+          <option value="score">按评分</option><option value="latency">按延迟</option>
+          <option value="kbps">按吞吐</option><option value="checks">按检测次数</option>
+          <option value="recent">按最近检测</option><option value="name">按名称</option>
+        </select>
+        <button id="sSearch" class="primary">查询</button>
+      </div>
+      <table><thead><tr>
+        <th>频道</th><th class="hide-sm">分组</th><th>评分</th><th>状态</th>
+        <th class="hide-sm">延迟</th><th class="hide-sm">吞吐</th><th class="hide-sm">分辨率</th>
+        <th class="hide-sm">检测/可用率</th><th class="hide-sm">主机</th><th style="width:160px">操作</th>
+      </tr></thead><tbody id="streamsBody"></tbody></table>
+      <div class="pager"><button id="prevPage">上一页</button>
+        <span id="pageInfo">—</span><button id="nextPage">下一页</button></div>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------ 参数 -->
+  <section class="tabpage hidden" id="page-settings">
+    <div class="panel">
+      <div class="controls">
+        <button class="primary" id="saveConfig">保存参数</button>
+        <span class="sub">数值类下一轮更新生效；<code>server.*</code> 需要重启服务。</span>
+      </div>
+      <div id="settingsForm" class="settings"></div>
+      <pre class="logs sm hidden" id="configOut"></pre>
+    </div>
+  </section>
+</div>
+
+<!-- 令牌输入 -->
+<div class="modal" id="authModal">
+  <div class="box narrow">
+    <header><h3>需要管理令牌</h3></header>
+    <div class="body">
+      <p class="sub">令牌来自 <code>config.json</code> 的 <code>server.admin_token</code>，
+        未设置时自动生成在 <code>data/admin_token</code>。也可在服务器执行
+        <code>python3 -m iptvhub token</code> 查看。</p>
+      <div class="controls">
+        <input type="password" id="tokenInput" placeholder="粘贴管理令牌" style="flex:1">
+        <button class="primary" id="tokenSave">进入</button>
+      </div>
+      <p class="sub" id="authError" style="color:var(--bad)"></p>
+    </div>
+  </div>
+</div>
+
+<!-- 详情弹窗 -->
+<div class="modal" id="detailModal">
+  <div class="box">
+    <header><h3 id="detailTitle">详情</h3><button id="detailClose">关闭</button></header>
+    <div class="body"><pre class="logs" id="detailBody"></pre></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<script src="static/admin.js"></script>
+</body>
+</html>

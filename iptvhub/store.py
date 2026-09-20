@@ -255,6 +255,76 @@ class Store:
         return [dict(row) for row in self._connect().execute(
             "SELECT * FROM runs ORDER BY id DESC LIMIT ?", (limit,))]
 
+    # -------------------------------------------------------------- 后台查询
+    def query_streams(self, q: str = "", group: str = "", alive: Optional[int] = None,
+                      error: str = "", channel_key: str = "", order: str = "score",
+                      limit: int = 200, offset: int = 0) -> Dict[str, Any]:
+        """管理后台的源级检索。"""
+        where, params = [], []
+        if q:
+            where.append("(display_name LIKE ? OR url LIKE ? OR host LIKE ?)")
+            like = "%%%s%%" % q
+            params += [like, like, like]
+        if group:
+            where.append("group_title = ?")
+            params.append(group)
+        if alive is not None:
+            where.append("alive = ?")
+            params.append(int(alive))
+        if error:
+            where.append("last_error = ?")
+            params.append(error)
+        if channel_key:
+            where.append("channel_key = ?")
+            params.append(channel_key)
+
+        clause = ("WHERE " + " AND ".join(where)) if where else ""
+        orders = {
+            "score": "score DESC", "latency": "ttfb_ms ASC", "kbps": "kbps DESC",
+            "checks": "checks DESC", "name": "display_name ASC", "recent": "last_check_at DESC",
+        }
+        order_by = orders.get(order, orders["score"])
+
+        conn = self._connect()
+        total = conn.execute("SELECT COUNT(*) FROM streams %s" % clause, params).fetchone()[0]
+        rows = conn.execute(
+            "SELECT * FROM streams %s ORDER BY %s LIMIT ? OFFSET ?" % (clause, order_by),
+            params + [int(limit), int(offset)]).fetchall()
+        return {"total": total, "rows": [dict(r) for r in rows]}
+
+    def source_stats(self) -> Dict[str, Dict[str, int]]:
+        """每个上游源贡献了多少候选 / 多少可用（sources 列是 JSON 数组）。"""
+        stats: Dict[str, Dict[str, int]] = {}
+        for row in self._connect().execute("SELECT sources, alive FROM streams"):
+            try:
+                names = json.loads(row["sources"] or "[]")
+            except (ValueError, TypeError):
+                names = []
+            for name in names:
+                entry = stats.setdefault(name, {"candidates": 0, "alive": 0})
+                entry["candidates"] += 1
+                entry["alive"] += int(row["alive"] or 0)
+        return stats
+
+    def error_breakdown(self, limit: int = 20) -> List[Dict[str, Any]]:
+        rows = self._connect().execute(
+            """SELECT last_error AS error, COUNT(*) AS count FROM streams
+               WHERE alive = 0 AND last_check_at > 0 AND last_error != ''
+               GROUP BY last_error ORDER BY count DESC LIMIT ?""", (limit,))
+        return [dict(r) for r in rows]
+
+    def group_names(self) -> List[str]:
+        return [r[0] for r in self._connect().execute(
+            "SELECT DISTINCT group_title FROM streams ORDER BY group_title")]
+
+    def delete_stream(self, url: str) -> int:
+        with self._write_lock:
+            conn = self._connect()
+            with conn:
+                removed = conn.execute("DELETE FROM streams WHERE url = ?", (url,)).rowcount
+                conn.execute("DELETE FROM checks WHERE url = ?", (url,))
+        return removed
+
     # ------------------------------------------------------------------ 运行
     def start_run(self) -> int:
         with self._write_lock:

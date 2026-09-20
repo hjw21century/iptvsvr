@@ -124,3 +124,65 @@ def load_sources(path: str = None):
 def load_groups(path: str = None) -> Dict[str, Any]:
     path = path or os.path.join(CONFIG_DIR, "groups.json")
     return _load_json(path)
+
+
+# --------------------------------------------------------------------- 后台读写
+# 管理后台需要读写配置文件原文（含 _comment 等注释键），因此与上面的"加载合并后
+# 的运行配置"分开。写入一律先落临时文件再 os.replace，避免写坏配置。
+
+def _atomic_write_json(path: str, payload: Dict[str, Any]) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=False, indent=2)
+        handle.write("\n")
+    os.replace(tmp, path)
+
+
+def config_file_path(path: str = None) -> str:
+    return path or os.environ.get("IPTVHUB_CONFIG") or os.path.join(CONFIG_DIR, "config.json")
+
+
+def sources_file_path(path: str = None) -> str:
+    return path or os.path.join(CONFIG_DIR, "sources.json")
+
+
+def load_config_file(path: str = None) -> Dict[str, Any]:
+    """读取 config.json 原文（不与默认值合并）。"""
+    return _load_json(config_file_path(path))
+
+
+def save_config_file(payload: Dict[str, Any], path: str = None) -> str:
+    target = config_file_path(path)
+    _atomic_write_json(target, payload)
+    return target
+
+
+def load_sources_raw(path: str = None) -> list:
+    """读取 sources.json 中的全部源（含被停用的），供后台展示与编辑。"""
+    payload = _load_json(sources_file_path(path))
+    items = []
+    for item in payload.get("sources", []):
+        items.append({
+            "name": item.get("name") or item.get("url", ""),
+            "url": item.get("url", ""),
+            "type": (item.get("type") or "auto").lower(),
+            "enabled": bool(item.get("enabled", True)),
+            "weight": float(item.get("weight", 1.0)),
+            "note": item.get("note", ""),
+        })
+    return items
+
+
+def save_sources(sources: list, path: str = None) -> str:
+    target = sources_file_path(path)
+    existing = _load_json(target)
+    payload = {
+        "_comment": existing.get(
+            "_comment",
+            "上游公开源清单。type: m3u | txt | auto(按扩展名推断)。"
+            "enabled=false 可临时停用；note 说明停用原因。weight 影响评分中的来源加权。"),
+        "sources": sources,
+    }
+    _atomic_write_json(target, payload)
+    return target

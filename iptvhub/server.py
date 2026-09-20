@@ -15,6 +15,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, List, Optional
 
 from . import export
+from .admin import AdminApi
+from .config import load_config
+from .runtime import RUN_STATE, attach_log_ring
 from .store import Store
 from .util import human_time
 
@@ -95,7 +98,8 @@ class Updater:
         self._running = True
         started = time.time()
         try:
-            summary = Pipeline(self.cfg).run(**kwargs)
+            # 重新读盘：管理后台改过的参数下一轮就生效，不必重启服务
+            summary = Pipeline(load_config()).run(**kwargs)
             summary["finished_at"] = human_time()
             self._last = summary
         except Exception as exc:  # noqa: BLE001
@@ -119,14 +123,15 @@ class Updater:
             if due and not self._running:
                 log.info("定时更新触发（距上次 %s）",
                          human_time(last_run) if last_run else "从未运行")
-                self.trigger()
+                self.trigger(trigger="schedule")
             self._stop.wait(60)
 
     def shutdown(self) -> None:
         self._stop.set()
 
 
-def make_handler(cfg: dict, cache: ChannelCache, store: Store, updater: Updater):
+def make_handler(cfg: dict, cache: ChannelCache, store: Store, updater: Updater,
+                 admin: AdminApi):
     web_dir = cfg["paths"]["web"]
     data_dir = cfg["paths"]["data"]
     admin_token = (cfg["server"].get("admin_token") or "").strip()
@@ -191,25 +196,68 @@ def make_handler(cfg: dict, cache: ChannelCache, store: Store, updater: Updater)
 
         do_HEAD = do_GET
 
+        def _read_body(self) -> Dict[str, Any]:
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                length = 0
+            if length <= 0 or length > 4 << 20:
+                return {}
+            raw = self.rfile.read(length)
+            try:
+                payload = json.loads(raw.decode("utf-8"))
+            except (ValueError, UnicodeDecodeError):
+                return {}
+            return payload if isinstance(payload, dict) else {}
+
         def do_POST(self) -> None:  # noqa: N802
             parsed = urllib.parse.urlsplit(self.path)
             path = parsed.path.rstrip("/") or "/"
             query = urllib.parse.parse_qs(parsed.query)
-            if path == "/api/update":
-                token = (query.get("token", [""])[0]
-                         or self.headers.get("X-Admin-Token", ""))
-                if admin_token and token != admin_token:
-                    self._json({"error": "unauthorized"}, 401)
+            try:
+                if path.startswith("/api/admin"):
+                    self._admin(path, query, "POST")
                     return
-                started = updater.trigger()
-                self._json({"started": started, "running": updater.running}, 202 if started else 409)
+                if path == "/api/update":
+                    # 旧接口保留：nginx 只放行本机；另可用 admin_token
+                    token = (query.get("token", [""])[0]
+                             or self.headers.get("X-Admin-Token", ""))
+                    if admin_token and token != admin_token:
+                        self._json({"error": "unauthorized"}, 401)
+                        return
+                    started = updater.trigger(trigger="api")
+                    self._json({"started": started, "running": updater.running},
+                               202 if started else 409)
+                    return
+                self._json({"error": "not found"}, 404)
+            except BrokenPipeError:
+                pass
+            except Exception as exc:  # noqa: BLE001
+                log.exception("请求处理失败 %s", self.path)
+                self._json({"error": str(exc)}, 500)
+
+        def _admin(self, path: str, query: Dict[str, List[str]], method: str) -> None:
+            supplied = (self.headers.get("X-Admin-Token", "")
+                        or query.get("token", [""])[0])
+            if not admin.authorized(supplied):
+                self._json({"error": "unauthorized", "hint": "需要管理令牌"}, 401)
                 return
-            self._json({"error": "not found"}, 404)
+            body = self._read_body() if method == "POST" else {}
+            sub = path[len("/api/admin"):] or "/"
+            sub = sub.rstrip("/") or "/"
+            status, payload = admin.handle(method, sub, query, body)
+            self._json(payload, status)
 
         # ---------------------------------------------------------- 分发
         def _route(self, path: str, query: Dict[str, List[str]]) -> None:
             if path == "/":
                 self._file(os.path.join(web_dir, "index.html"))
+                return
+            if path == "/admin":
+                self._file(os.path.join(web_dir, "admin.html"))
+                return
+            if path.startswith("/api/admin"):
+                self._admin(path, query, "GET")
                 return
             if path == "/healthz":
                 self._json({"ok": True, "time": human_time(), "updating": updater.running})
@@ -289,6 +337,7 @@ def make_handler(cfg: dict, cache: ChannelCache, store: Store, updater: Updater)
 
             if path == "/api/stats":
                 stats = store.stats()
+                stats["run"] = RUN_STATE.snapshot()
                 stats["generated_at"] = payload.get("generated_at", "")
                 stats["channel_count"] = len(payload.get("channels", []))
                 stats["updating"] = updater.running
@@ -352,8 +401,10 @@ def serve(cfg: dict) -> None:
     cache = ChannelCache(os.path.join(cfg["paths"]["data"], "channels.json"))
     store = Store(cfg["paths"]["db"])
     updater = Updater(cfg)
+    admin = AdminApi(cfg, store, updater, cache)
+    attach_log_ring()
 
-    handler = make_handler(cfg, cache, store, updater)
+    handler = make_handler(cfg, cache, store, updater, admin)
     httpd = ThreadingHTTPServer((host, port), handler)
     httpd.daemon_threads = True
 
@@ -361,7 +412,12 @@ def serve(cfg: dict) -> None:
         threading.Thread(target=updater.loop, name="iptvhub-scheduler", daemon=True).start()
         log.info("内置定时更新已启用，每 %d 小时一次", updater.interval // 3600)
 
-    log.info("IPTV-Hub 服务已启动: http://%s:%d", host if host != "0.0.0.0" else "127.0.0.1", port)
+    base = "http://%s:%d" % (host if host != "0.0.0.0" else "127.0.0.1", port)
+    log.info("IPTV-Hub 服务已启动: %s", base)
+    token = admin.token()
+    log.info("管理后台: %s/admin  令牌已就绪（%s，或执行 python3 -m iptvhub token 查看）",
+             base, "来自 config.json" if cfg["server"].get("admin_token") else admin.token_path)
+    del token
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

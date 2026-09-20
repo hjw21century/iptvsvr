@@ -110,6 +110,71 @@ class TestClassifier(unittest.TestCase):
         self.assertEqual(self.classifier.group_of(display, "山东频道"), "山东频道")
 
 
+class TestClassifierOrdering(unittest.TestCase):
+    """分组优先级与短关键词误判的回归用例。"""
+
+    def setUp(self):
+        self.classifier = Classifier(GROUPS)
+
+    def group(self, name: str) -> str:
+        return self.classifier.group_of(self.classifier.canonical(name)[0])
+
+    def test_short_ascii_keywords_need_exact_match(self):
+        # "AM" 曾命中 "Asian DrAMa"，"RT" 曾命中 "SpoRTs"
+        self.assertNotEqual(self.group("Asian Drama"), "广播频道")
+        self.assertNotEqual(self.group("深圳体育 Sports"), "海外频道")
+
+    def test_geo_beats_language_and_theme(self):
+        self.assertEqual(self.group("深圳体育 Sports"), "广东频道")
+        self.assertEqual(self.group("Anhui TV"), "安徽频道")
+
+    def test_english_channels_go_overseas(self):
+        for name in ("BBC News", "RT News", "HBO HD", "Sports TV"):
+            self.assertEqual(self.group(name), "海外频道", name)
+
+    def test_platform_game_rooms(self):
+        self.assertEqual(self.group("「B站」王者荣耀"), "游戏电竞")
+        self.assertEqual(self.group("「斗鱼」和平精英"), "游戏电竞")
+
+    def test_hmt_before_satellite(self):
+        self.assertEqual(self.group("凤凰卫视资讯"), "港澳台频道")
+        self.assertEqual(self.group("湖南卫视"), "卫视频道")
+
+
+class TestAdminApi(unittest.TestCase):
+    """后台鉴权与配置校验。"""
+
+    def setUp(self):
+        import tempfile as _tempfile
+        from iptvhub.admin import AdminApi
+        from iptvhub.config import load_config
+        self.tmpdir = _tempfile.mkdtemp()
+        cfg = load_config()
+        cfg = dict(cfg, paths=dict(cfg["paths"], data=self.tmpdir))
+        cfg["server"] = dict(cfg["server"], admin_token="")
+        self.api = AdminApi(cfg, None, None, None)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_token_is_generated_and_persisted(self):
+        token = self.api.token()
+        self.assertEqual(len(token), 32)
+        self.assertTrue(os.path.exists(self.api.token_path))
+        self.assertEqual(token, self.api.token())
+
+    def test_authorization(self):
+        self.assertTrue(self.api.authorized(self.api.token()))
+        self.assertFalse(self.api.authorized(""))
+        self.assertFalse(self.api.authorized("wrong"))
+        self.assertFalse(self.api.authorized(self.api.token() + "x"))
+
+    def test_unknown_route(self):
+        status, _ = self.api.handle("GET", "/nope", {}, {})
+        self.assertEqual(status, 404)
+
+
 class TestProbeParsing(unittest.TestCase):
     def test_sniff(self):
         self.assertEqual(sniff_kind(b"#EXTM3U\n#EXT-X-VERSION:3", ""), "hls")

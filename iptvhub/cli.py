@@ -77,6 +77,27 @@ def cmd_stats(args) -> int:
     return 0
 
 
+def cmd_token(args) -> int:
+    """查看或重置管理后台令牌。"""
+    from .admin import AdminApi
+    from .store import Store
+    cfg = load_config(args.config)
+    admin = AdminApi(cfg, Store(cfg["paths"]["db"]), None, None)
+    if args.reset:
+        import os
+        import secrets
+        token = secrets.token_hex(16)
+        with open(admin.token_path, "w", encoding="utf-8") as handle:
+            handle.write(token + "\n")
+        os.chmod(admin.token_path, 0o600)
+        print("已重置令牌（重启服务后生效）")
+    configured = (cfg.get("server", {}).get("admin_token") or "").strip()
+    print("管理后台 : %s/admin" % (cfg.get("site_url") or "http://127.0.0.1:%d" % cfg["server"]["port"]))
+    print("令牌     : %s" % admin.token())
+    print("来源     : %s" % ("config.json server.admin_token" if configured else admin.token_path))
+    return 0
+
+
 def cmd_probe(args) -> int:
     from .netclient import HttpClient
     from .probe import Prober
@@ -130,6 +151,10 @@ def main(argv=None) -> int:
 
     stats = sub.add_parser("stats", help="查看当前库内统计")
     stats.set_defaults(func=cmd_stats)
+
+    token = sub.add_parser("token", help="查看/重置管理后台令牌")
+    token.add_argument("--reset", action="store_true", help="生成新令牌")
+    token.set_defaults(func=cmd_token)
 
     probe = sub.add_parser("probe", help="调试：深度探测指定链接")
     probe.add_argument("urls", nargs="+")

@@ -53,6 +53,17 @@ class Classifier:
         self._cache: Dict[str, Tuple[str, str]] = {}
 
     @staticmethod
+    def _hit(key: str, token: str) -> bool:
+        """短 ASCII 关键词只做精确匹配。
+
+        否则 "AM" 会命中 "Asian DrAMa"、"RT" 会命中 "SpoRTs"，
+        中文词保持子串匹配（"浙江" 需要能命中 "浙江民生休闲"）。
+        """
+        if token.isascii() and len(token) <= 3:
+            return key == token
+        return token in key
+
+    @staticmethod
     def _sorted_keys(values) -> List[str]:
         keys = [normalize_key(v) for v in values if normalize_key(v)]
         return sorted(set(keys), key=len, reverse=True)
@@ -105,10 +116,10 @@ class Classifier:
         if key in self._group_lookup:
             return self._group_lookup[key]
         for token, group in self.geo_tokens:
-            if token in key:
+            if self._hit(key, token):
                 return group
         for token, theme in self.theme_tokens:
-            if len(token) >= 4 and token in key:
+            if len(token) >= 4 and self._hit(key, token):
                 return theme
         return None
 
@@ -130,7 +141,7 @@ class Classifier:
 
         # 3. 港澳台（先于卫视：凤凰卫视 / 莲花卫视 属于港澳台）
         for token in self.hmt:
-            if token and token in key:
+            if token and self._hit(key, token):
                 return "港澳台频道"
 
         # 4. 卫视
@@ -138,26 +149,25 @@ class Classifier:
             if marker in key:
                 return "卫视频道"
 
-        # 5. 海外
-        for token in self.overseas:
-            if token and token in key:
-                return "海外频道"
-
-        # 6. 省市
+        # 5. 省市（地名优先于语言与主题：深圳体育 → 广东频道）
         for token, group in self.geo_tokens:
-            if token in key:
+            if self._hit(key, token):
                 return group
+
+        # 6. 海外关键词 + 纯英文频道
+        #    放在主题之前：BBC News / RT News 归"海外"比归"新闻"更好找
+        for token in self.overseas:
+            if token and self._hit(key, token):
+                return "海外频道"
+        if _ASCII_RE.match(key or "中") and len(key) >= 3:
+            return "海外频道"
 
         # 7. 主题
         for token, theme in self.theme_tokens:
-            if token in key:
+            if self._hit(key, token):
                 return theme
 
-        # 8. 纯英文频道视为海外
-        if _ASCII_RE.match(key or "x") and len(key) >= 3:
-            return "海外频道"
-
-        # 9. 参考上游分组
+        # 8. 参考上游分组
         upstream_match = self._upstream_group(upstream_group)
         if upstream_match:
             return upstream_match

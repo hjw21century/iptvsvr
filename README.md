@@ -83,12 +83,14 @@ iptv/
 │   ├── export.py         M3U / M3U8 / TXT / JSON 导出与过滤
 │   ├── pipeline.py       采集 → 探测 → 评分 → 导出 全流程
 │   ├── server.py         HTTP 服务：网页 + API + 动态播放列表 + 定时更新
+│   ├── admin.py          管理后台 API（令牌鉴权、源/参数读写、实时探测）
+│   ├── runtime.py        进程内运行状态：更新进度 + 日志环形缓冲
 │   └── cli.py            命令行入口
 ├── config/
 │   ├── config.json       运行参数（并发、超时、权重、服务端口…）
 │   ├── sources.json      上游源清单
 │   └── groups.json       分组规则（省市地名、主题关键字、噪声词、别名）
-├── web/                  控制台（index.html / app.js / style.css，无构建步骤）
+├── web/                  前台 index.html + 后台 admin.html（原生 JS，无构建步骤）
 ├── data/                 运行产物：iptv.db + playlist.* + channels.json
 ├── deploy/               systemd unit / timer、nginx 站点、install.sh 一键部署
 ├── scripts/selftest.py   离线自测
@@ -114,6 +116,7 @@ python3 -m iptvhub serve            # 默认 0.0.0.0:8088
 
 # 其它
 python3 -m iptvhub stats            # 查看库内统计与分组分布
+python3 -m iptvhub token            # 查看管理后台地址与令牌
 python3 -m iptvhub probe <url>      # 调试单条链接，输出探测细节
 python3 -m iptvhub export           # 不重测，仅用库中数据重新评分并导出
 python3 -m iptvhub static --out public   # 导出纯静态站点
@@ -182,6 +185,30 @@ https://iptv.tomeleaf.com/playlist.txt      https://iptv.tomeleaf.com/playlist.j
 `https://iptv.tomeleaf.com/playlist.m3u?group=央视频道&min_height=1080&ipv=4&backups=1`
 
 播放列表响应带 `Cache-Control: public, max-age=120`，订阅器频繁拉取时不会每次都回源重算。
+
+### 管理后台 `/admin`
+
+浏览器打开 `https://iptv.tomeleaf.com/admin`，首次进入需要输入管理令牌：
+
+```bash
+python3 -m iptvhub token           # 查看令牌与后台地址
+python3 -m iptvhub token --reset   # 换一个（重启服务生效）
+```
+
+令牌优先取 `config.json` 的 `server.admin_token`；没设置时自动生成并保存在
+`data/admin_token`（0600）。令牌校验用 `hmac.compare_digest`，不会写进日志。
+
+四个页签：
+
+| 页签 | 能做什么 |
+|------|----------|
+| **概览与运行** | 统计卡片；一键触发「开始更新 / 全量重测 / 仅采集 / 抽样 200 条」；**实时进度条 + 滚动日志**（增量拉取）；「重新评分并导出」「清理失效源」；最近运行记录与失败原因分布 |
+| **上游源** | 表格式增删改：启用开关、名称、地址、类型、权重；显示每个源贡献了多少候选/多少可用；**单源测试**（抓取 + 解析 + 归类预览 + 有多少是新地址），保存即写回 `config/sources.json` |
+| **源明细排查** | 按关键词/分组/状态/错误类型/排序检索到单条 URL；查看某条源的**历次探测记录**；**实时重测**单条链接（返回类型、分辨率、吞吐、错误）；删除脏数据 |
+| **参数** | 表单调整探测/评分/清理/选优参数与四项权重，带取值范围校验；越界或不在白名单的键会被拒绝并回显原因。数值项下一轮更新即生效（每轮重新读盘），`server.*` 需重启 |
+
+后台接口都在 `/api/admin/*`，需要 `X-Admin-Token` 头（或 `?token=`）。
+写操作做了白名单与范围校验，配置/源文件都是**先写临时文件再原子替换**。
 
 **API**：
 

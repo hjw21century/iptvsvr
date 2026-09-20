@@ -12,6 +12,7 @@ from .config import load_config, load_groups, load_sources
 from .netclient import HttpClient
 from .parser import NoiseFilter, parse_playlist
 from .probe import Prober
+from .runtime import RUN_STATE
 from .store import Store
 from .util import fmt_duration, human_time
 
@@ -132,6 +133,7 @@ class Pipeline:
                 results.append({"url": url, "probe": probe})
                 done += 1
                 alive += 1 if probe.ok else 0
+                RUN_STATE.progress(done, total, alive)
                 if progress_every and done % progress_every == 0:
                     elapsed = time.time() - started
                     rate = done / max(elapsed, 1e-6)
@@ -145,16 +147,27 @@ class Pipeline:
 
     # ------------------------------------------------------------- 全流程
     def run(self, limit: int = 0, skip_probe: bool = False,
-            recheck_all: bool = False) -> Dict[str, Any]:
+            recheck_all: bool = False, trigger: str = "cli") -> Dict[str, Any]:
         run_id = self.store.start_run()
         started = time.time()
+        RUN_STATE.begin(trigger)
         log.info("=== 开始更新 %s ===", human_time())
 
+        try:
+            return self._run(run_id, started, limit, skip_probe, recheck_all)
+        except Exception as exc:  # noqa: BLE001
+            RUN_STATE.finish("error", str(exc))
+            self.store.finish_run(run_id, note="失败: %s" % exc)
+            raise
+
+    def _run(self, run_id: int, started: float, limit: int, skip_probe: bool,
+             recheck_all: bool) -> Dict[str, Any]:
         collected = self.collect()
         candidates = collected["candidates"]
         log.info("采集到候选源 %d 条（来自 %d/%d 个上游）",
                  len(candidates), collected["sources_ok"], collected["sources_total"])
 
+        RUN_STATE.update(phase="probe", message="已采集 %d 条候选源" % len(candidates))
         self._resolve_ip_versions(candidates)
         self.store.upsert_candidates(candidates.values())
 
@@ -179,6 +192,7 @@ class Pipeline:
             probe_results = self.probe_urls(url_list)
             self.store.record_probes(probe_results, alpha=float(self.cfg.get("ewma_alpha", 0.4)))
 
+        RUN_STATE.update(phase="export", message="正在评分与导出")
         channels = self.rescore_and_export()
         alive = sum(1 for item in probe_results if item["probe"].ok)
 
@@ -196,6 +210,8 @@ class Pipeline:
         log.info("=== 更新完成：频道 %d 个 / 可用源 %d 条 / 清理 %d 条 / 总耗时 %s ===",
                  len(channels), alive, pruned["streams_removed"],
                  fmt_duration(time.time() - started))
+        RUN_STATE.finish("done", "频道 %d / 可用源 %d / 耗时 %s" % (
+            len(channels), alive, fmt_duration(time.time() - started)))
 
         return {
             "run_id": run_id,
