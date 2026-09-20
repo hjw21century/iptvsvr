@@ -186,6 +186,16 @@ def make_handler(cfg: dict, cache: ChannelCache, store: Store, updater: Updater,
             path = parsed.path.rstrip("/") or "/"
             query = urllib.parse.parse_qs(parsed.query)
 
+            # /admin/ 这类带尾斜杠的地址会让页面里的相对资源解析成 /admin/static/...
+            # 直接 301 回无斜杠形式，避免"页面打开了但脚本 404"
+            if parsed.path != path and parsed.path != "/":
+                target = path + (("?" + parsed.query) if parsed.query else "")
+                self.send_response(301)
+                self.send_header("Location", target)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+
             try:
                 self._route(path, query)
             except BrokenPipeError:

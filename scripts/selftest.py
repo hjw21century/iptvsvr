@@ -337,6 +337,53 @@ class TestExport(unittest.TestCase):
         self.assertEqual(ipv6[0]["url"], "http://b/1")
 
 
+class TestWebAssets(unittest.TestCase):
+    """前端资源的静态检查。
+
+    admin.js 曾因一处引号不配对（'...' 与 "..." 混用）整份脚本解析失败，
+    页面能打开但所有按钮无响应——这类问题必须在发布前挡住。
+    """
+
+    WEB = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web")
+    PAIRS = [("admin.js", "admin.html"), ("app.js", "index.html")]
+    DYNAMIC_IDS = {"moreBtn"}  # 由 JS 运行时插入，不在静态 HTML 里
+
+    def test_js_syntax(self):
+        try:
+            import esprima  # 可选的开发期依赖：pip install esprima
+        except ImportError:  # pragma: no cover
+            self.skipTest("未安装 esprima，跳过 JS 语法检查")
+        for name, _ in self.PAIRS:
+            path = os.path.join(self.WEB, name)
+            with open(path, encoding="utf-8") as handle:
+                source = handle.read()
+            try:
+                esprima.parseScript(source)
+            except Exception as exc:  # noqa: BLE001
+                self.fail("%s 语法错误: %s" % (name, exc))
+
+    def test_referenced_ids_exist(self):
+        import re
+        for js_name, html_name in self.PAIRS:
+            with open(os.path.join(self.WEB, js_name), encoding="utf-8") as handle:
+                js_source = handle.read()
+            with open(os.path.join(self.WEB, html_name), encoding="utf-8") as handle:
+                html_source = handle.read()
+            used = set(re.findall(r'el\("([^"]+)"\)', js_source))
+            used |= set(re.findall(r'getElementById\("([^"]+)"\)', js_source))
+            defined = set(re.findall(r'id="([^"]+)"', html_source))
+            missing = sorted(used - defined - self.DYNAMIC_IDS)
+            self.assertEqual(missing, [], "%s 引用了 %s 中不存在的 id" % (js_name, html_name))
+
+    def test_assets_use_relative_paths(self):
+        """静态导出要能在子路径下托管，页面里不能写绝对 /static/。"""
+        for _, html_name in self.PAIRS:
+            with open(os.path.join(self.WEB, html_name), encoding="utf-8") as handle:
+                html_source = handle.read()
+            self.assertNotIn('href="/static/', html_source, html_name)
+            self.assertNotIn('src="/static/', html_source, html_name)
+
+
 class TestStore(unittest.TestCase):
     def setUp(self):
         handle, self.path = tempfile.mkstemp(suffix=".db")

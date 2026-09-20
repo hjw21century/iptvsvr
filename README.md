@@ -120,7 +120,7 @@ python3 -m iptvhub token            # 查看管理后台地址与令牌
 python3 -m iptvhub probe <url>      # 调试单条链接，输出探测细节
 python3 -m iptvhub export           # 不重测，仅用库中数据重新评分并导出
 python3 -m iptvhub static --out public   # 导出纯静态站点
-python3 scripts/selftest.py         # 离线自测
+python3 scripts/selftest.py         # 离线自测（装了 esprima 时会额外做 JS 语法检查）
 ```
 
 > 无自有服务器时也可以用 GitHub Actions 跑：把 `deploy/github-actions/update.yml`
@@ -206,6 +206,9 @@ python3 -m iptvhub token --reset   # 换一个（重启服务生效）
 | **上游源** | 表格式增删改：启用开关、名称、地址、类型、权重；显示每个源贡献了多少候选/多少可用；**单源测试**（抓取 + 解析 + 归类预览 + 有多少是新地址），保存即写回 `config/sources.json` |
 | **源明细排查** | 按关键词/分组/状态/错误类型/排序检索到单条 URL；查看某条源的**历次探测记录**；**实时重测**单条链接（返回类型、分辨率、吞吐、错误）；删除脏数据 |
 | **参数** | 表单调整探测/评分/清理/选优参数与四项权重，带取值范围校验；越界或不在白名单的键会被拒绝并回显原因。数值项下一轮更新即生效（每轮重新读盘），`server.*` 需重启 |
+
+前端资源由 `scripts/selftest.py` 做静态把关：JS 语法（需 `pip install esprima`，未安装则跳过）、
+JS 引用的元素 id 必须在 HTML 里存在、页面不得写死绝对 `/static/` 路径。
 
 后台接口都在 `/api/admin/*`，需要 `X-Admin-Token` 头（或 `?token=`）。
 写操作做了白名单与范围校验，配置/源文件都是**先写临时文件再原子替换**。

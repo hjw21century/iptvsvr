@@ -308,7 +308,7 @@
     html += "<fieldset><legend>服务（需重启生效）</legend>" +
       '<div class="field"><label>自动更新</label><select data-s="auto_update">' +
         '<option value="1"' + (server.auto_update ? " selected" : "") + ">开启</option>" +
-        '<option value="0"' + (server.auto_update ? "" : " selected") + ">关闭</option></select></div>' +
+        '<option value="0"' + (server.auto_update ? "" : " selected") + ">关闭</option></select></div>" +
       '<div class="field"><label>更新间隔(小时)</label>' +
         '<input type="number" min="1" max="72" data-s="update_interval_hours" value="' +
         (server.update_interval_hours || 4) + '"></div>' +
