@@ -39,7 +39,8 @@ EDITABLE_NUMBERS = {
     "proxy_max_request_mb": (1, 4096), "proxy_max_request_seconds": (10, 3600),
 }
 EDITABLE_STRINGS = ("epg_url", "site_url", "user_agent")
-EDITABLE_WEIGHTS = ("stability", "speed", "quality", "latency", "https_bonus", "ipv4_bonus")
+EDITABLE_WEIGHTS = ("stability", "speed", "quality", "latency", "https_bonus",
+                    "ipv4_bonus", "direct_bonus")
 EDITABLE_SERVER = {"auto_update": bool, "update_interval_hours": int, "admin_token": str}
 
 

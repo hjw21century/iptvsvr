@@ -428,6 +428,21 @@ def make_handler(cfg: dict, cache: ChannelCache, store: Store, updater: Updater,
                 self._proxy(query)
                 return
 
+            if path == "/channel.m3u":
+                key = query.get("key", [""])[0]
+                name = query.get("name", [""])[0]
+                channels = [c for c in cache.channels
+                            if (key and c.get("key") == key)
+                            or (name and c.get("name") == name)]
+                if not channels:
+                    self._json({"error": "未找到该频道"}, 404)
+                    return
+                content = export.render_m3u(channels, True, epg_url=epg_url,
+                                            site_url=site_url)
+                self._text(content, ctype="audio/x-mpegurl; charset=utf-8",
+                           filename="%s.m3u" % (channels[0].get("name") or "channel"))
+                return
+
             if path.startswith("/playlist"):
                 self._playlist(path, query)
                 return

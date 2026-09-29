@@ -188,25 +188,39 @@ https://iptv.tomeleaf.com/playlist.txt      https://iptv.tomeleaf.com/playlist.j
 
 播放列表响应带 `Cache-Control: public, max-age=120`，订阅器频繁拉取时不会每次都回源重算。
 
-### 网页播放与中转 `/proxy`
+### 网页播放：能直连就直连，剩下的才中转
 
-浏览器放不出来、VLC 却正常，是浏览器独有的两条限制：页面是 `https://` 而绝大多数
-直播源是 `http://`（**混合内容**被拦），且上游几乎都不返回 `Access-Control-Allow-Origin`
-（**跨域**被拦）。表现就是 hls.js 报 `manifestLoadError`。
+浏览器放不出来、VLC 却正常，是浏览器独有的两条限制：页面是 `https://` 而很多
+直播源是 `http://`（**混合内容**被拦），且不少上游不返回 `Access-Control-Allow-Origin`
+（**跨域**被拦）。表现就是 hls.js 报 `manifestLoadError`。VLC 两条都不受限。
 
-因此网页内播放统一走本站中转 `/proxy?u=<地址>`：
+所以播放分两条路，探测时就把每条源归好类：
 
-* 拉到 manifest 后**改写其中的分片/子清单/密钥地址**，让整条链路都经本站 HTTPS；
+**① 直连（不花本站一分流量）** —— 探测时带上 `Origin` 走一遍完整链路
+（manifest → variant → 分片），**每一跳都是 https 且都返回可用的 CORS 头**，
+才标记为 `direct`。这类源浏览器自己去拉，本站只提供一个地址。
+实测库里 **46% 的可用源是 https**，其中大部分带 `Access-Control-Allow-Origin: *`。
+评分里有 `direct_bonus`，同等条件下优先把这类源选为主源——对用户一样好，对服务器省钱。
+
+**② 中转 `/proxy?u=<地址>`** —— 其余的（http 源、不给 CORS 的源）才经本站 HTTPS 转一道：
+
+* 拉到 manifest 后**改写其中的分片/子清单/密钥地址**，让整条链路都经本站；
 * 改写出来的地址带 HMAC 签名，首个 manifest 则必须是**库中已收录**的地址——
   两道一起挡住"被人当开放代理用"；
-* 响应补上 CORS 头，分片按上游的 `Content-Length` 透传，没有长度就用 chunked；
-**复制出来给 VLC / IPTV 播放器用的仍然是原始地址**，不经过中转，不占本站带宽。
+* 响应补上 CORS 头，分片按上游的 `Content-Length` 透传，没有长度就用 chunked。
+
+前端先按 `direct` 标记直连，**失败自动退回中转**再试一次，用户无感。
+源列表上每条都标了「直连 / 中转」。
+
+**③ 完全不经浏览器** —— 播放面板提供 `下载本频道 m3u`（`/channel.m3u?key=…`，约 1 KB），
+双击用 VLC / PotPlayer 打开；复制按钮给的也一直是**原始地址**。这条路零本站流量，
+也是长期观看的推荐方式。
 
 #### 流量闸门
 
 中转是流量放大器：一个人在网页看 1 小时 3.5 Mbps 的流，出站就是 **1.5 GB 左右**
 （入站同样一份）。作为参照，本机 9 周累计出站才 11.8 GB——也就是说
-**一个人看一小时，抵得上这台机器过去 9 天的出站量**。所以做了三层闸门加计量：
+**一个人看一小时，抵得上这台机器过去 9 天的出站量**。所以对"中转"这条路设三层闸门：
 
 | 配置项 | 默认 | 作用 |
 |--------|------|------|
@@ -216,7 +230,8 @@ https://iptv.tomeleaf.com/playlist.txt      https://iptv.tomeleaf.com/playlist.j
 | `proxy_max_concurrent` | 6 | 全站同时中转的请求数 |
 | `proxy_max_request_mb` / `_seconds` | 200 / 300 | 单次请求上限，挡住无限长的裸 TS 流 |
 
-（任意一项填 0 表示不限。）触发上限时返回 429，页面会提示"请复制地址用 VLC 播放"。
+（任意一项填 0 表示不限；`proxy_enabled: false` 可整体关掉中转，页面只保留目录、
+复制地址与 m3u 下载。）触发上限时返回 429，页面提示"请复制地址用 VLC 播放"。
 网页端另有 **10 分钟预览上限**，到点自动暂停，避免后台标签页整天挂着耗流量。
 
 用量按天累计并持久化（进程收到 SIGTERM 会先落盘再退出，`systemctl restart` 不丢账），
@@ -326,7 +341,7 @@ score = 0.45·稳定性 + 0.25·吞吐 + 0.20·画质 + 0.10·延迟
 | `max_backups_per_channel` | 3 | 每频道备用源数量 |
 | `min_score` | 0.15 | 低于此分不进播放列表 |
 | `server.host` / `server.port` | 127.0.0.1 / 8088 | 监听地址；公网由 nginx 反代 |
-| `proxy_enabled` / `proxy_max_concurrent` | true / 12 | 网页播放中转开关与并发上限 |
+| `proxy_enabled` | true | 网页播放中转总开关（关掉后只剩直连源与 m3u 下载） |
 | `server.update_interval_hours` | 4 | 内置定时更新间隔 |
 | `site_url` | `https://iptv.tomeleaf.com` | 写进 M3U 头部的 `# Source:`，标明播放列表来源 |
 

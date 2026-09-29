@@ -405,6 +405,56 @@ class TestProxy(unittest.TestCase):
         self.assertFalse(self.proxy.looks_like_manifest(b"\x47\x00", "video/mp2t"))
 
 
+class TestDirectPlayback(unittest.TestCase):
+    """能否让浏览器绕开本站直连：https 全程 + 每一跳都带可用 CORS 头。"""
+
+    class FakeResponse:
+        def __init__(self, allow=None):
+            self.headers = {"Access-Control-Allow-Origin": allow} if allow else {}
+
+    def prober(self, origin="https://iptv.tomeleaf.com"):
+        from iptvhub.netclient import HttpClient
+        from iptvhub.probe import Prober
+        return Prober(HttpClient({}), {"site_url": origin})
+
+    def note(self, allow, final_url, origin="https://iptv.tomeleaf.com"):
+        from iptvhub.probe import ProbeResult
+        result = ProbeResult(direct=True)
+        self.prober(origin)._note_transport(result, self.FakeResponse(allow), final_url)
+        return result.direct
+
+    def test_wildcard_cors_over_https(self):
+        self.assertTrue(self.note("*", "https://h/live.m3u8"))
+
+    def test_origin_echo_is_accepted(self):
+        self.assertTrue(self.note("https://iptv.tomeleaf.com", "https://h/live.m3u8"))
+        self.assertTrue(self.note("https://iptv.tomeleaf.com/", "https://h/live.m3u8"))
+
+    def test_http_hop_breaks_direct(self):
+        self.assertFalse(self.note("*", "http://h/live.m3u8"))
+
+    def test_missing_or_foreign_cors_breaks_direct(self):
+        self.assertFalse(self.note(None, "https://h/live.m3u8"))
+        self.assertFalse(self.note("https://someone.else", "https://h/live.m3u8"))
+
+    def test_once_false_stays_false(self):
+        from iptvhub.probe import ProbeResult
+        result = ProbeResult(direct=False)
+        self.prober()._note_transport(result, self.FakeResponse("*"), "https://h/a.ts")
+        self.assertFalse(result.direct)
+
+    def test_direct_gets_score_bonus(self):
+        weights = {"stability": 0.45, "speed": 0.25, "quality": 0.20, "latency": 0.10,
+                   "direct_bonus": 0.03}
+        base = dict(url="http://h/a", channel_key="K", display_name="K", group_title="G",
+                    alive=1, checks=5, successes=5, ewma=0.9, kbps=2000,
+                    resolution="1280x720", ttfb_ms=200, scheme="https", ip_version=4,
+                    host="h", sources="[]", source_weight=1.0, fail_streak=0, logo="")
+        plain = rank.score_row(dict(base, direct=0), weights, 0.4)
+        direct = rank.score_row(dict(base, direct=1), weights, 0.4)
+        self.assertGreater(direct, plain)
+
+
 class TestProxyMeter(unittest.TestCase):
     """中转流量闸门：三层配额、跨日重置、重启后不丢账。"""
 

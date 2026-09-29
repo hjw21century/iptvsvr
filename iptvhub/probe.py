@@ -41,6 +41,8 @@ class ProbeResult:
     segments: int = 0
     variants: int = 0
     encrypted: bool = False
+    # 浏览器能否绕过本站直连：整条链路都是 https 且每一跳都带可用的 CORS 头
+    direct: bool = True
     error: str = ""
     elapsed_ms: float = 0.0
     redirects: List[str] = field(default_factory=list)
@@ -61,6 +63,7 @@ class ProbeResult:
             "bytes": self.bytes_read, "resolution": self.resolution,
             "bandwidth": self.bandwidth, "segments": self.segments,
             "variants": self.variants, "encrypted": self.encrypted,
+            "direct": self.direct,
             "error": self.error, "elapsed_ms": round(self.elapsed_ms, 1),
         }
 
@@ -204,6 +207,8 @@ class Prober:
         self.min_bytes = cfg.get("min_bytes", 16 * 1024)
         self.manifest_max_bytes = cfg.get("manifest_max_bytes", 1 << 20)
         self.retries = cfg.get("probe_retries", 0)
+        # 探测时带上 Origin，才能看出上游会不会回显/放行我们的域名
+        self.origin = (cfg.get("site_url") or "").rstrip("/")
 
     # ------------------------------------------------------------------ API
     def probe(self, url: str, referer: str = None) -> ProbeResult:
@@ -264,14 +269,31 @@ class Prober:
 
     def _open(self, url: str, result: ProbeResult, referer: str = None):
         timeout = max(1.0, min(self.connect_timeout, self.probe_timeout))
-        response, ttfb = self.client.open(url, timeout=timeout, referer=referer)
+        headers = {"Origin": self.origin} if self.origin else None
+        response, ttfb = self.client.open(url, timeout=timeout, headers=headers,
+                                          referer=referer)
         if not result.ttfb_ms:
             result.ttfb_ms = ttfb * 1000
         result.status = response.getcode() or 200
         final_url = response.geturl()
         if final_url != url:
             result.redirects.append(final_url)
+        self._note_transport(result, response, final_url)
         return response, final_url
+
+    def _note_transport(self, result: ProbeResult, response, final_url: str) -> None:
+        """只要链路上有一跳是 http 或缺 CORS 头，浏览器就没法直连。"""
+        if not result.direct:
+            return
+        if not final_url.lower().startswith("https://"):
+            result.direct = False
+            return
+        allow = (response.headers.get("Access-Control-Allow-Origin") or "").strip()
+        if allow == "*":
+            return
+        if self.origin and allow.rstrip("/") == self.origin:
+            return
+        result.direct = False
 
     def _walk(self, url: str, result: ProbeResult, deadline: float, depth: int,
               referer: str = None) -> None:

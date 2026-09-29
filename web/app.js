@@ -181,10 +181,20 @@
   var sessionTimer = null;
   var PREVIEW_MINUTES = 10;   // 网页预览时长上限，到点自动暂停，避免后台标签页一直耗流量
 
-  /* 网页播放必须经本站 HTTPS 中转：源站是 http:// 且不带 CORS 头，
-     浏览器会以混合内容 + 跨域两条规则拦截（VLC 等播放器没有这些限制）。 */
-  function playable(url) {
-    return "/proxy?u=" + encodeURIComponent(url);
+  /* 能直连就直连：源本身是 https 且带 CORS 头时，浏览器可以自己去拉，
+     一点本站带宽都不占。其余的（http 源 / 不给 CORS）才经本站中转——
+     浏览器有混合内容与跨域两条限制，VLC 等播放器没有。 */
+  function streamOf(channel, url) {
+    var list = channel.streams || [];
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].url === url) return list[i];
+    }
+    return list[0] || { url: url, direct: false };
+  }
+
+  function playable(stream, forceProxy) {
+    if (stream.direct && !forceProxy) return stream.url;
+    return "/proxy?u=" + encodeURIComponent(stream.url);
   }
 
   function loadHls(callback) {
@@ -214,7 +224,11 @@
   }
 
   function renderStreams(channel) {
-    el("streamList").innerHTML = (channel.streams || []).map(function (stream, index) {
+    var head = '<div class="stream-tip">网页播放仅供试看（10 分钟自动暂停）。' +
+      '标「直连」的源由浏览器直接拉取，不占本站流量；标「中转」的源受每日配额限制。' +
+      '长期观看请 <a href="/channel.m3u?key=' + encodeURIComponent(channel.key) +
+      '" download>下载本频道 m3u</a> 用 VLC 等播放器打开。</div>';
+    el("streamList").innerHTML = head + (channel.streams || []).map(function (stream, index) {
       var label = index === 0 ? "主源" : "备用" + index;
       var mine = feedbackState.items.filter(function (item) { return item.url === stream.url; });
       return '<div class="stream-row" data-url="' + escapeHtml(stream.url) + '">' +
@@ -258,7 +272,7 @@
       }).catch(function () { renderStreams(channel); });
   }
 
-  function play(channel, url) {
+  function play(channel, url, forceProxy) {
     var video = el("player");
     el("modalTitle").textContent = channel.name;
     el("modal").classList.add("open");
@@ -269,7 +283,9 @@
     renderStreams(channel);
     loadFeedback(channel);
 
-    var target = playable(url || channel.url);
+    var stream = streamOf(channel, url || channel.url);
+    var viaProxy = !stream.direct || forceProxy;
+    var target = playable(stream, forceProxy);
     if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
 
     loadHls(function () {
@@ -279,6 +295,12 @@
         hlsInstance.attachMedia(video);
         hlsInstance.on(window.Hls.Events.ERROR, function (_e, data) {
           if (!data.fatal) return;
+          if (!viaProxy) {
+            // 直连失败（多半是上游临时不给 CORS），退回本站中转再试一次
+            toast("直连失败，改用本站中转…");
+            play(channel, stream.url, true);
+            return;
+          }
           // 可能是中转配额用完了，去问一下真实原因
           fetch(target).then(function (r) {
             if (r.status === 429 || r.status === 503) {

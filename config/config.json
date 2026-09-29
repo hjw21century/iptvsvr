@@ -27,7 +27,8 @@
     "quality": 0.2,
     "latency": 0.1,
     "https_bonus": 0.03,
-    "ipv4_bonus": 0.02
+    "ipv4_bonus": 0.02,
+    "direct_bonus": 0.03
   },
   "server": {
     "host": "127.0.0.1",

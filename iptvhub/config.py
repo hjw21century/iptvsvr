@@ -66,6 +66,7 @@ DEFAULTS: Dict[str, Any] = {
         "latency": 0.10,
         "https_bonus": 0.03,
         "ipv4_bonus": 0.02,
+        "direct_bonus": 0.03,   # 浏览器可直连（https + CORS），不占本站中转带宽
     },
 
     "server": {

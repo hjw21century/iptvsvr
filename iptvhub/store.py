@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS streams (
     bandwidth      INTEGER DEFAULT 0,
     segments       INTEGER DEFAULT 0,
     encrypted      INTEGER DEFAULT 0,
+    direct         INTEGER DEFAULT 0,
     last_error     TEXT DEFAULT '',
     score          REAL DEFAULT 0.0
 );
@@ -107,6 +108,16 @@ class Store:
         self._write_lock = threading.Lock()
         with self._connect() as conn:
             conn.executescript(SCHEMA)
+        self._migrate()
+
+    def _migrate(self) -> None:
+        """给老库补上后加的列（SQLite 没有 IF NOT EXISTS 的 ADD COLUMN）。"""
+        conn = self._connect()
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(streams)")}
+        for column, ddl in (("direct", "direct INTEGER DEFAULT 0"),):
+            if column not in existing:
+                with conn:
+                    conn.execute("ALTER TABLE streams ADD COLUMN %s" % ddl)
 
     # ------------------------------------------------------------- 连接管理
     def _connect(self) -> sqlite3.Connection:
@@ -174,7 +185,8 @@ class Store:
                 ok, alpha, now, now if ok else 0,
                 probe.kind, probe.ttfb_ms, probe.kbps, probe.resolution,
                 int(probe.bandwidth or 0), int(probe.segments or 0),
-                1 if probe.encrypted else 0, probe.error or "", url,
+                1 if probe.encrypted else 0, probe.error or "",
+                1 if (probe.ok and probe.direct) else 0, url,
             ))
             if keep_history:
                 history.append((url, now, ok, probe.ttfb_ms, probe.kbps, probe.error or ""))
@@ -202,8 +214,9 @@ class Store:
                         bandwidth     = CASE WHEN ?1 = 1 AND ?9 > 0 THEN ?9 ELSE bandwidth END,
                         segments      = CASE WHEN ?1 = 1 THEN ?10 ELSE segments END,
                         encrypted     = CASE WHEN ?1 = 1 THEN ?11 ELSE encrypted END,
-                        last_error    = ?12
-                    WHERE url = ?13
+                        last_error    = ?12,
+                        direct        = CASE WHEN ?1 = 1 THEN ?13 ELSE direct END
+                    WHERE url = ?14
                     """, updates)
                 if history:
                     conn.executemany(

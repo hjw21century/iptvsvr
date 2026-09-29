@@ -96,6 +96,9 @@ def score_row(row: Dict[str, Any], weights: Dict[str, float], alpha: float) -> f
         components += weights.get("https_bonus", 0.03)
     if int(row.get("ip_version") or 0) == 4:
         components += weights.get("ipv4_bonus", 0.02)
+    # 浏览器能直连的源不消耗本站中转带宽，同等条件下优先
+    if int(row.get("direct") or 0):
+        components += weights.get("direct_bonus", 0.03)
 
     # 被多个上游同时收录 => 更可信
     try:
@@ -174,6 +177,7 @@ def pick_best(rows: Sequence[Dict[str, Any]], cfg: Dict[str, Any],
             "resolution": best.get("resolution") or "",
             "kind": best.get("kind") or "",
             "ip_version": int(best.get("ip_version") or 0),
+            "direct": bool(best.get("direct")),
             "uptime": round(_uptime(best), 3),
             "sources": _sources(best),
             "streams": [{
@@ -183,6 +187,7 @@ def pick_best(rows: Sequence[Dict[str, Any]], cfg: Dict[str, Any],
                 "ttfb_ms": round(float(e.get("ttfb_ms") or 0), 1),
                 "resolution": e.get("resolution") or "",
                 "ip_version": int(e.get("ip_version") or 0),
+                "direct": bool(e.get("direct")),
                 "uptime": round(_uptime(e), 3),
                 "host": e.get("host") or "",
             } for e in chosen],
