@@ -16,9 +16,15 @@ DEFAULTS: Dict[str, Any] = {
     # 对外访问地址，用于播放列表头部标注来源；留空则不输出
     "site_url": "",
 
-    # 网页内播放用的中转：浏览器有混合内容与跨域限制，必须经本站转一道
+    # 网页内播放用的中转：浏览器有混合内容与跨域限制，必须经本站转一道。
+    # 中转会放大流量（一个人看 1 小时 1080p≈1.5GB 出站），所以三层设闸。
     "proxy_enabled": True,
-    "proxy_max_concurrent": 12,
+    "proxy_max_concurrent": 6,          # 全站同时中转的请求数
+    "proxy_daily_gb": 10,               # 全站每日中转流量上限（GB），0=不限
+    "proxy_per_ip_daily_mb": 1200,      # 单个访客每日上限（MB），约 1 小时高清
+    "proxy_per_ip_concurrent": 2,       # 单个访客同时预览的路数
+    "proxy_max_request_mb": 200,        # 单次请求最多中转多少（挡住无限长的裸流）
+    "proxy_max_request_seconds": 300,   # 单次请求最长持续时间
 
     # 播放器用的 EPG（节目单）地址，会写进 M3U 头部 x-tvg-url
     "epg_url": "https://live.fanmingming.cn/e.xml",

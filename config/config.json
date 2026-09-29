@@ -38,5 +38,10 @@
   },
   "site_url": "https://iptv.tomeleaf.com",
   "proxy_enabled": true,
-  "proxy_max_concurrent": 12
+  "proxy_max_concurrent": 6,
+  "proxy_daily_gb": 10,
+  "proxy_per_ip_daily_mb": 1200,
+  "proxy_per_ip_concurrent": 2,
+  "proxy_max_request_mb": 200,
+  "proxy_max_request_seconds": 300
 }

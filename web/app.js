@@ -178,6 +178,8 @@
   // ---------------------------------------------------------------- 播放
   var hlsInstance = null;
   var currentChannel = null;
+  var sessionTimer = null;
+  var PREVIEW_MINUTES = 10;   // 网页预览时长上限，到点自动暂停，避免后台标签页一直耗流量
 
   /* 网页播放必须经本站 HTTPS 中转：源站是 http:// 且不带 CORS 头，
      浏览器会以混合内容 + 跨域两条规则拦截（VLC 等播放器没有这些限制）。 */
@@ -276,16 +278,35 @@
         hlsInstance.loadSource(target);
         hlsInstance.attachMedia(video);
         hlsInstance.on(window.Hls.Events.ERROR, function (_e, data) {
-          if (data.fatal) toast("播放失败：" + data.details);
+          if (!data.fatal) return;
+          // 可能是中转配额用完了，去问一下真实原因
+          fetch(target).then(function (r) {
+            if (r.status === 429 || r.status === 503) {
+              return r.json().then(function (payload) {
+                toast(payload.error || "预览暂时不可用，请复制地址用 VLC 播放");
+              });
+            }
+            toast("播放失败：" + data.details);
+          }).catch(function () { toast("播放失败：" + data.details); });
         });
       } else {
         video.src = target;
       }
       video.play().catch(function () { /* 需要用户手势，忽略 */ });
+      startSessionTimer(video);
     });
   }
 
+  function startSessionTimer(video) {
+    clearTimeout(sessionTimer);
+    sessionTimer = setTimeout(function () {
+      video.pause();
+      toast("网页预览已暂停（" + PREVIEW_MINUTES + " 分钟上限）。长时间观看请复制地址用 VLC");
+    }, PREVIEW_MINUTES * 60000);
+  }
+
   function closeModal() {
+    clearTimeout(sessionTimer);
     el("modal").classList.remove("open");
     var video = el("player");
     video.pause();

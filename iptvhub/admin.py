@@ -34,6 +34,9 @@ EDITABLE_NUMBERS = {
     "prune_fail_streak": (1, 100), "recheck_dead_after_hours": (0, 168),
     "max_backups_per_channel": (0, 10), "max_per_host_per_channel": (1, 10),
     "min_score": (0.0, 1.0), "fetch_timeout": (2, 120),
+    "proxy_max_concurrent": (0, 64), "proxy_daily_gb": (0, 2000),
+    "proxy_per_ip_daily_mb": (0, 200000), "proxy_per_ip_concurrent": (1, 10),
+    "proxy_max_request_mb": (1, 4096), "proxy_max_request_seconds": (10, 3600),
 }
 EDITABLE_STRINGS = ("epg_url", "site_url", "user_agent")
 EDITABLE_WEIGHTS = ("stability", "speed", "quality", "latency", "https_bonus", "ipv4_bonus")
@@ -41,11 +44,12 @@ EDITABLE_SERVER = {"auto_update": bool, "update_interval_hours": int, "admin_tok
 
 
 class AdminApi:
-    def __init__(self, cfg: dict, store, updater, cache):
+    def __init__(self, cfg: dict, store, updater, cache, proxy=None):
         self.cfg = cfg
         self.store = store
         self.updater = updater
         self.cache = cache
+        self.proxy = proxy
         self.feedback = None          # 由 serve() 注入
         self._token: Optional[str] = None
 
@@ -125,6 +129,7 @@ class AdminApi:
             "update_interval_hours": self.cfg["server"].get("update_interval_hours", 4),
             "data_dir": self.cfg["paths"]["data"],
             "feedback": self.store.feedback_stats(),
+            "proxy": self.proxy.meter.snapshot() if self.proxy else None,
         }
 
     def _progress(self, query, body):

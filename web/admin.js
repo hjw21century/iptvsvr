@@ -96,6 +96,12 @@
     el("tVersion").textContent = data.generated_at || "—";
     el("tAuto").textContent = data.auto_update
       ? "开启 · 每 " + data.update_interval_hours + " 小时" : "已关闭";
+    var proxy = data.proxy;
+    el("tProxy").innerHTML = proxy
+      ? proxy.gb + " / " + proxy.daily_limit_gb + " GB（" + proxy.percent + "%）" +
+        '<div class="hint">正在预览 ' + proxy.active + " 路 · 请求 " + proxy.requests +
+        " · 被限 " + proxy.blocked + "</div>"
+      : "未启用";
     el("serverTime").textContent = "服务器时间 " + (data.server_time || "");
 
     el("runsBody").innerHTML = (data.runs || []).map(function (run) {
@@ -302,6 +308,9 @@
     prune_fail_streak: "清理：连续失败次数", recheck_dead_after_hours: "失效冷却(小时)",
     max_backups_per_channel: "每频道备用源数", max_per_host_per_channel: "同频道同主机上限",
     min_score: "入选最低评分", fetch_timeout: "上游清单抓取超时(秒)",
+    proxy_max_concurrent: "全站同时中转路数", proxy_daily_gb: "全站每日中转上限(GB)",
+    proxy_per_ip_daily_mb: "单访客每日上限(MB)", proxy_per_ip_concurrent: "单访客同时路数",
+    proxy_max_request_mb: "单次请求上限(MB)", proxy_max_request_seconds: "单次请求上限(秒)",
     stability: "稳定性", speed: "吞吐", quality: "画质", latency: "延迟",
     https_bonus: "HTTPS 加成", ipv4_bonus: "IPv4 加成",
     epg_url: "EPG 节目单地址", site_url: "对外站点地址", user_agent: "探测 User-Agent"
@@ -312,7 +321,10 @@
               "probe_retries", "host_failure_limit", "fetch_timeout"]],
     ["评分与选优", ["ewma_alpha", "min_score", "max_backups_per_channel",
                    "max_per_host_per_channel"]],
-    ["清理策略", ["prune_after_days", "prune_fail_streak", "recheck_dead_after_hours"]]
+    ["清理策略", ["prune_after_days", "prune_fail_streak", "recheck_dead_after_hours"]],
+    ["网页预览中转（流量闸门）", ["proxy_max_concurrent", "proxy_daily_gb",
+                                 "proxy_per_ip_daily_mb", "proxy_per_ip_concurrent",
+                                 "proxy_max_request_mb", "proxy_max_request_seconds"]]
   ];
 
   function renderSettings(data) {

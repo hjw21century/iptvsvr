@@ -8,6 +8,7 @@
 import json
 import logging
 import os
+import signal
 import threading
 import time
 import urllib.parse
@@ -232,8 +233,15 @@ def make_handler(cfg: dict, cache: ChannelCache, store: Store, updater: Updater,
             if not proxy.authorized(url, signature):
                 self._json({"error": "forbidden"}, 403)
                 return
+
+            client = self._client_ip()
+            allowed, reason = proxy.meter.check(client)
+            if not allowed:
+                self._json({"error": reason, "quota": True}, 429)
+                return
             if not proxy.acquire():
-                self._json({"error": "proxy busy"}, 503)
+                proxy.meter.done(client)
+                self._json({"error": "当前预览人数已满，请稍后再试"}, 503)
                 return
 
             response = None
@@ -251,7 +259,9 @@ def make_handler(cfg: dict, cache: ChannelCache, store: Store, updater: Updater,
                         response, proxy.manifest_max_bytes, deadline)
                     text = body.decode("utf-8", errors="ignore")
                     rewritten = proxy.rewrite_manifest(text, final_url)
-                    self._send(rewritten.encode("utf-8"), 200,
+                    payload = rewritten.encode("utf-8")
+                    proxy.meter.add(client, len(payload))
+                    self._send(payload, 200,
                                "application/vnd.apple.mpegurl; charset=utf-8",
                                cache_control="no-cache")
                     return
@@ -272,7 +282,7 @@ def make_handler(cfg: dict, cache: ChannelCache, store: Store, updater: Updater,
                 self.send_header("Access-Control-Allow-Origin", "*")
                 self.send_header("Cache-Control", "public, max-age=10")
                 self.end_headers()
-                self._pump(response, head, chunked)
+                self._pump(response, head, chunked, client)
             except (BrokenPipeError, ConnectionResetError):
                 pass
             except Exception as exc:  # noqa: BLE001
@@ -288,9 +298,14 @@ def make_handler(cfg: dict, cache: ChannelCache, store: Store, updater: Updater,
                     except Exception:  # noqa: BLE001
                         pass
                 proxy.release()
+                proxy.meter.done(client)
 
-        def _pump(self, response, head: bytes, chunked: bool) -> None:
-            """把上游码流边读边写给浏览器；客户端断开即结束。"""
+        def _pump(self, response, head: bytes, chunked: bool, client: str) -> None:
+            """把上游码流边读边写给浏览器；客户端断开、超量或超时即结束。
+
+            HLS 是一片一个请求，天然短；裸 TS 流则可能一直不断，
+            所以这里对单次请求的字节数与时长都设上限。
+            """
             def write(piece: bytes) -> None:
                 if chunked:
                     self.wfile.write(b"%X\r\n" % len(piece))
@@ -299,18 +314,28 @@ def make_handler(cfg: dict, cache: ChannelCache, store: Store, updater: Updater,
                 else:
                     self.wfile.write(piece)
 
+            meter = proxy.meter
+            deadline = time.time() + meter.max_request_seconds
+            sent = 0
             try:
                 if head:
                     write(head)
+                    sent += len(head)
                 while True:
+                    if sent >= meter.max_request_bytes or time.time() > deadline:
+                        log.debug("中转单请求达到上限，主动结束 (%d 字节)", sent)
+                        break
                     piece = response.read(proxy.chunk_size)
                     if not piece:
                         break
                     write(piece)
+                    sent += len(piece)
                 if chunked:
                     self.wfile.write(b"0\r\n\r\n")
             except (BrokenPipeError, ConnectionResetError):
                 pass
+            finally:
+                meter.add(client, sent)
 
         def _client_ip(self) -> str:
             forwarded = self.headers.get("X-Forwarded-For", "")
@@ -540,8 +565,8 @@ def serve(cfg: dict) -> None:
     cache = ChannelCache(os.path.join(cfg["paths"]["data"], "channels.json"))
     store = Store(cfg["paths"]["db"])
     updater = Updater(cfg)
-    admin = AdminApi(cfg, store, updater, cache)
     proxy = StreamProxy(cfg, store, HttpClient(cfg))
+    admin = AdminApi(cfg, store, updater, cache, proxy)
     feedback = FeedbackService(store, proxy.secret)
     admin.feedback = feedback
     attach_log_ring()
@@ -549,6 +574,19 @@ def serve(cfg: dict) -> None:
     handler = make_handler(cfg, cache, store, updater, admin, proxy, feedback)
     httpd = ThreadingHTTPServer((host, port), handler)
     httpd.daemon_threads = True
+
+    # systemd stop/restart 发的是 SIGTERM，默认会直接杀掉进程，
+    # 中转流量计数就丢了；这里接管信号，先落盘再退出。
+    def _shutdown(signum, _frame):
+        log.info("收到信号 %s，正在退出…", signum)
+        proxy.meter.flush()
+        threading.Thread(target=httpd.shutdown, daemon=True).start()
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            signal.signal(sig, _shutdown)
+        except (ValueError, OSError):  # pragma: no cover - 非主线程时忽略
+            pass
 
     if updater.enabled:
         threading.Thread(target=updater.loop, name="iptvhub-scheduler", daemon=True).start()
@@ -566,4 +604,5 @@ def serve(cfg: dict) -> None:
         log.info("收到中断信号，正在退出…")
     finally:
         updater.shutdown()
+        proxy.meter.flush()
         httpd.server_close()

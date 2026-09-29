@@ -350,9 +350,16 @@ class TestProxy(unittest.TestCase):
 
         class FakeStore:
             known = {"http://known/live.m3u8"}
+            meta = {}
 
             def stream(self, url):
                 return {"url": url} if url in self.known else None
+
+            def get_meta(self, key, default=""):
+                return self.meta.get(key, default)
+
+            def set_meta(self, key, value):
+                self.meta[key] = value
 
         self.proxy = StreamProxy(cfg, FakeStore())
 
@@ -396,6 +403,73 @@ class TestProxy(unittest.TestCase):
         self.assertTrue(self.proxy.looks_like_manifest(b"#EXTM3U\n", ""))
         self.assertTrue(self.proxy.looks_like_manifest(b"", "application/vnd.apple.mpegurl"))
         self.assertFalse(self.proxy.looks_like_manifest(b"\x47\x00", "video/mp2t"))
+
+
+class TestProxyMeter(unittest.TestCase):
+    """中转流量闸门：三层配额、跨日重置、重启后不丢账。"""
+
+    CFG = {"proxy_daily_gb": 1.0 / 1024, "proxy_per_ip_daily_mb": 1,
+           "proxy_per_ip_concurrent": 2, "proxy_max_request_mb": 5,
+           "proxy_max_request_seconds": 30}
+
+    def meter(self, store=None, **overrides):
+        from iptvhub.proxy import Meter
+        cfg = dict(self.CFG)
+        cfg.update(overrides)
+        return Meter(cfg, store)
+
+    def test_per_ip_daily_quota(self):
+        meter = self.meter()
+        self.assertTrue(meter.check("1.1.1.1")[0])
+        meter.add("1.1.1.1", 2 << 20)                      # 2MB > 1MB 上限
+        allowed, reason = meter.check("1.1.1.1")
+        self.assertFalse(allowed)
+        self.assertIn("VLC", reason)
+        self.assertTrue(self.meter().check("2.2.2.2")[0])   # 不影响别的访客
+
+    def test_site_daily_quota(self):
+        meter = self.meter(proxy_per_ip_daily_mb=0)         # 0 = 单访客不限
+        meter.add("1.1.1.1", 2 << 20)                       # 超过全站 1MB
+        self.assertFalse(meter.check("9.9.9.9")[0])
+
+    def test_concurrent_limit(self):
+        meter = self.meter()
+        self.assertTrue(meter.check("3.3.3.3")[0])
+        self.assertTrue(meter.check("3.3.3.3")[0])
+        self.assertFalse(meter.check("3.3.3.3")[0])         # 第 3 路被拦
+        meter.done("3.3.3.3")
+        self.assertTrue(meter.check("3.3.3.3")[0])          # 关掉一路又可以了
+
+    def test_unlimited_when_zero(self):
+        meter = self.meter(proxy_daily_gb=0, proxy_per_ip_daily_mb=0,
+                           proxy_per_ip_concurrent=0)
+        meter.add("1.1.1.1", 100 << 20)
+        self.assertTrue(meter.check("1.1.1.1")[0])
+
+    def test_counters_survive_restart(self):
+        handle, path = tempfile.mkstemp(suffix=".db")
+        os.close(handle)
+        os.unlink(path)
+        store = Store(path)
+        try:
+            first = self.meter(store, proxy_per_ip_daily_mb=0, proxy_daily_gb=10)
+            first.add("1.1.1.1", 5 << 20)
+            first.flush()
+            second = self.meter(store, proxy_per_ip_daily_mb=0, proxy_daily_gb=10)
+            self.assertEqual(second.snapshot()["bytes"], 5 << 20)
+        finally:
+            store.close()
+            for suffix in ("", "-wal", "-shm"):
+                if os.path.exists(path + suffix):
+                    os.unlink(path + suffix)
+
+    def test_snapshot_shape(self):
+        meter = self.meter()
+        meter.add("1.1.1.1", 512 << 10)
+        snap = meter.snapshot()
+        for key in ("day", "gb", "daily_limit_gb", "percent", "requests",
+                    "blocked", "active", "top_clients"):
+            self.assertIn(key, snap)
 
 
 class TestFeedback(unittest.TestCase):
