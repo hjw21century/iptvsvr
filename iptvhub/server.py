@@ -20,6 +20,7 @@ from .admin import AdminApi
 from .config import load_config
 from .feedback import FeedbackService
 from .netclient import HttpClient
+from .notices import load_active
 from .proxy import StreamProxy
 from .runtime import RUN_STATE, attach_log_ring
 from .store import Store
@@ -542,6 +543,10 @@ def make_handler(cfg: dict, cache: ChannelCache, store: Store, updater: Updater,
                 self._json({"total": total, "count": len(channels),
                             "generated_at": payload.get("generated_at", ""),
                             "channels": channels})
+                return
+
+            if path == "/api/notice":
+                self._json({"notice": load_active(cfg["paths"]["config"])})
                 return
 
             if path == "/api/feedback":

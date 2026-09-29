@@ -337,6 +337,64 @@
     if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
   }
 
+  // ---------------------------------------------------------------- 公告
+  /* 节日祝福按日期区间自动上下线（见 config/notices.json），
+     欢迎弹窗每条公告只弹一次，横幅在有效期内一直挂着。 */
+  function loadNotice() {
+    fetch("/api/notice").then(function (r) { return r.json(); }).then(function (data) {
+      var notice = data.notice;
+      if (!notice) return;
+      renderNoticeBar(notice);
+      var seenKey = "iptvhub_notice_" + notice.id;
+      if (!localStorage.getItem(seenKey)) {
+        showWelcome(notice, seenKey);
+      }
+    }).catch(function () { /* 公告不是关键功能，失败就当没有 */ });
+  }
+
+  function renderNoticeBar(notice) {
+    el("noticeBar").innerHTML =
+      '<div class="notice ' + escapeHtml(notice.style || "info") + '">' +
+        '<span class="notice-emoji">' + escapeHtml(notice.emoji || "🎉") + "</span>" +
+        '<span class="notice-title">' + escapeHtml(notice.title || "") + "</span>" +
+        (notice.subtitle
+          ? '<span class="notice-sub">' + escapeHtml(notice.subtitle) + "</span>" : "") +
+        '<button class="link notice-more">查看详情</button>' +
+      "</div>";
+    var more = el("noticeBar").querySelector(".notice-more");
+    if (more) {
+      more.onclick = function () { showWelcome(notice, "iptvhub_notice_" + notice.id); };
+    }
+  }
+
+  function showWelcome(notice, seenKey) {
+    el("welcomeBody").innerHTML =
+      '<div class="welcome-emoji">' + escapeHtml(notice.emoji || "🎉") + "</div>" +
+      "<h2>" + escapeHtml(notice.title || "") + "</h2>" +
+      (notice.subtitle ? '<p class="welcome-sub">' + escapeHtml(notice.subtitle) + "</p>" : "") +
+      "<ul>" + (notice.lines || []).map(function (line) {
+        return "<li>" + escapeHtml(line) + "</li>";
+      }).join("") + "</ul>" +
+      '<button class="primary" id="welcomeEnter">' +
+      escapeHtml(notice.button || "进入") + "</button>";
+    el("welcomeBox").classList.add(escapeHtml(notice.style || "info"));
+    el("welcomeModal").classList.add("open");
+    function dismiss() {
+      localStorage.setItem(seenKey, "1");
+      el("welcomeModal").classList.remove("open");
+    }
+    el("welcomeEnter").onclick = dismiss;
+    el("welcomeModal").onclick = function (event) {
+      if (event.target === el("welcomeModal")) dismiss();
+    };
+    document.addEventListener("keydown", function onEsc(event) {
+      if (event.key === "Escape") {
+        dismiss();
+        document.removeEventListener("keydown", onEsc);
+      }
+    });
+  }
+
   // ---------------------------------------------------------------- 数据
   /* 既支持后端 API，也支持"纯静态导出"模式（无 API 时回退读取同目录 channels.json） */
   function fetchJson(primary, fallback) {
@@ -499,6 +557,7 @@
   }
 
   bind();
+  loadNotice();
   loadStats();
   loadChannels();
   setInterval(loadStats, 60000);

@@ -584,6 +584,58 @@ class TestFeedback(unittest.TestCase):
         self.assertEqual(len(clean_text("x" * 999, MAX_MESSAGE)), MAX_MESSAGE)
 
 
+class TestNotices(unittest.TestCase):
+    """节日公告按日期自动上下线——节后没人记得撤横幅，所以必须自动。"""
+
+    import datetime as _dt
+
+    ITEMS = [
+        {"id": "guoqing", "start": "2026-09-29", "end": "2026-10-08",
+         "title": "国庆快乐", "priority": 10, "style": "festive",
+         "lines": ["a", "b", "c", "d", "e", "f", "g", "h"]},
+        {"id": "always", "title": "长期公告", "priority": 1},
+        {"id": "off", "enabled": False, "title": "停用的", "priority": 99},
+    ]
+
+    def pick(self, day):
+        from iptvhub.notices import pick_active
+        return pick_active(self.ITEMS, self._dt.date(*map(int, day.split("-"))))
+
+    def test_active_inside_range(self):
+        for day in ("2026-09-29", "2026-10-01", "2026-10-08"):
+            self.assertEqual(self.pick(day)["id"], "guoqing", day)
+
+    def test_falls_back_outside_range(self):
+        self.assertEqual(self.pick("2026-09-28")["id"], "always")
+        self.assertEqual(self.pick("2026-10-09")["id"], "always")
+
+    def test_disabled_never_wins(self):
+        self.assertNotEqual(self.pick("2026-10-01")["id"], "off")
+
+    def test_lines_capped_and_style_validated(self):
+        notice = self.pick("2026-10-01")
+        self.assertEqual(len(notice["lines"]), 6)
+        self.assertEqual(notice["style"], "festive")
+        self.assertEqual(self.pick("2026-09-28")["style"], "info")   # 未指定则回落
+
+    def test_no_notice_when_empty(self):
+        from iptvhub.notices import pick_active
+        self.assertIsNone(pick_active([]))
+        self.assertIsNone(pick_active([{"id": "x", "enabled": False}]))
+
+    def test_bad_dates_are_ignored(self):
+        from iptvhub.notices import pick_active
+        items = [{"id": "bad", "start": "不是日期", "end": "xx", "title": "t"}]
+        self.assertEqual(pick_active(items, self._dt.date(2026, 10, 1))["id"], "bad")
+
+    def test_shipped_config_is_valid(self):
+        from iptvhub.config import CONFIG_DIR
+        from iptvhub.notices import load_active
+        self.assertEqual(load_active(CONFIG_DIR, self._dt.date(2026, 10, 1))["id"],
+                         "guoqing-2026")
+        self.assertIsNone(load_active(CONFIG_DIR, self._dt.date(2026, 11, 1)))
+
+
 class TestWebAssets(unittest.TestCase):
     """前端资源的静态检查。
 
@@ -593,7 +645,7 @@ class TestWebAssets(unittest.TestCase):
 
     WEB = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web")
     PAIRS = [("admin.js", "admin.html"), ("app.js", "index.html")]
-    DYNAMIC_IDS = {"moreBtn"}  # 由 JS 运行时插入，不在静态 HTML 里
+    DYNAMIC_IDS = {"moreBtn", "welcomeEnter"}  # 由 JS 运行时插入，不在静态 HTML 里
 
     def test_js_syntax(self):
         try:

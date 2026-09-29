@@ -228,3 +228,45 @@ button.link:hover { text-decoration: underline; }
   padding: 8px 10px; margin-bottom: 8px;
   background: var(--bg-elev-2); border-radius: 8px;
 }
+
+/* ---------------------------------------------------------- 节日公告 */
+.notice {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 10px 16px; margin-bottom: 16px; border-radius: var(--radius);
+  border: 1px solid var(--border); background: var(--bg-elev);
+}
+.notice .notice-emoji { font-size: 20px; line-height: 1; }
+.notice .notice-title { font-weight: 600; }
+.notice .notice-sub { color: var(--text-dim); font-size: 13px; }
+.notice .notice-more { margin-left: auto; }
+
+.notice.festive {
+  color: #fff7e6;
+  background: linear-gradient(100deg, #b31217 0%, #d7262c 45%, #e3a008 100%);
+  border-color: rgba(255, 215, 130, .45);
+  box-shadow: 0 2px 14px rgba(179, 18, 23, .25);
+}
+.notice.festive .notice-sub { color: #ffe7b8; }
+.notice.festive .notice-more { color: #fff3cf; }
+.notice.info { border-left: 3px solid var(--accent); }
+.notice.warn { border-left: 3px solid var(--warn); }
+
+.box.welcome { text-align: center; padding: 8px 0 4px; }
+.box.welcome .body { padding: 26px 30px 30px; }
+.welcome-emoji { font-size: 54px; line-height: 1.1; }
+.box.welcome h2 { margin: 10px 0 4px; font-size: 21px; }
+.welcome-sub { color: var(--text-dim); margin: 0 0 16px; letter-spacing: 2px; }
+.box.welcome ul {
+  text-align: left; margin: 0 auto 20px; padding: 0 0 0 20px;
+  max-width: 420px; color: var(--text-dim); font-size: 13px; line-height: 2;
+}
+.box.welcome button.primary { padding: 9px 30px; font-size: 14px; }
+.box.welcome.festive {
+  background: linear-gradient(170deg, #8d0d11 0%, #b31217 38%, var(--bg-elev) 100%);
+  border-color: rgba(255, 215, 130, .4);
+}
+.box.welcome.festive h2, .box.welcome.festive .welcome-sub { color: #fff7e6; }
+.box.welcome.festive ul { color: #ffe7b8; }
+.box.welcome.festive button.primary {
+  background: #ffd98a; border-color: #ffd98a; color: #7a0c10; font-weight: 600;
+}

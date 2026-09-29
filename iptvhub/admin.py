@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from . import config as config_module
 from .classify import Classifier
 from .netclient import HttpClient
+from .notices import load_active
 from .parser import NoiseFilter, parse_playlist
 from .probe import Prober
 from .runtime import LOG_RING, RUN_STATE
@@ -131,6 +132,7 @@ class AdminApi:
             "data_dir": self.cfg["paths"]["data"],
             "feedback": self.store.feedback_stats(),
             "proxy": self.proxy.meter.snapshot() if self.proxy else None,
+            "notice": load_active(self.cfg["paths"]["config"]),
         }
 
     def _progress(self, query, body):

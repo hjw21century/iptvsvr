@@ -86,10 +86,12 @@ iptv/
 │   ├── admin.py          管理后台 API（令牌鉴权、源/参数读写、实时探测）
 │   ├── proxy.py          ★ 网页播放中转：manifest 改写 + HMAC 签名 + 防开放代理
 │   ├── feedback.py       观众反馈：校验、限流、IP 加盐哈希
+│   ├── notices.py        站内公告按日期区间自动生效
 │   ├── runtime.py        进程内运行状态：更新进度 + 日志环形缓冲
 │   └── cli.py            命令行入口
 ├── config/
 │   ├── config.json       运行参数（并发、超时、权重、服务端口…）
+│   ├── notices.json      节日公告 / 欢迎界面（按日期自动上下线）
 │   ├── sources.json      上游源清单
 │   └── groups.json       分组规则（省市地名、主题关键字、噪声词、别名）
 ├── web/                  前台 index.html + 后台 admin.html（原生 JS，无构建步骤）
@@ -250,6 +252,27 @@ https://iptv.tomeleaf.com/playlist.txt      https://iptv.tomeleaf.com/playlist.j
 * 访客 IP 只存**加盐哈希**（16 位），不落明文；
 * 后台「观众反馈」页可筛选、隐藏、删除，并给出把反馈折算成排序系数的参考值
   （当前只展示，不自动改排序，避免被刷）。
+
+### 节日公告 / 欢迎界面
+
+`config/notices.json` 里按日期区间配置，**到期自动上线、过期自动消失**，
+不需要谁记得回来撤横幅：
+
+```json
+{"id": "guoqing-2026", "enabled": true,
+ "start": "2026-09-29", "end": "2026-10-08", "priority": 10,
+ "style": "festive", "emoji": "🇨🇳",
+ "title": "普天同庆，祝伟大祖国生日快乐",
+ "subtitle": "国庆快乐 · 阖家团圆",
+ "lines": ["假期期间直播源照常每 4 小时自动检测更新", "…"],
+ "button": "进入观看"}
+```
+
+* 页面顶部一条横幅（`festive` 为红金渐变，另有 `info` / `warn`），
+  首次访问再弹一次欢迎卡片，**同一条公告每人只弹一次**（记在 localStorage），
+  之后可以点横幅上的「查看详情」再看；
+* 同时命中多条时按 `priority` 取最大的；`enabled: false` 可临时停用；
+* 接口 `GET /api/notice`，后台概览也会显示当前生效的公告。
 
 ### 管理后台 `/admin`
 
