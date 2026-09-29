@@ -38,9 +38,10 @@
     "update_interval_hours": 4
   },
   "site_url": "https://iptv.tomeleaf.com",
-  "require_login": true,
+  "require_login": false,
   "session_days": 14,
   "proxy_enabled": true,
+  "proxy_require_login": true,
   "proxy_max_concurrent": 6,
   "proxy_daily_gb": 10,
   "proxy_per_ip_daily_mb": 1200,

@@ -418,3 +418,8 @@ button.link:hover { text-decoration: underline; }
 }
 .user-chip b { color: var(--text); font-weight: 600; }
 .user-chip .role { color: var(--accent); }
+
+button.muted { color: var(--text-dim); border-style: dashed; }
+button.muted:hover { color: var(--accent); border-color: var(--accent); }
+a.user-chip { text-decoration: none; }
+a.user-chip:hover { border-color: var(--accent); color: var(--accent); }

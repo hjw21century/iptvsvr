@@ -82,8 +82,12 @@
     var minHeight = parseInt(el("quality").value, 10) || 0;
     var ipv = parseInt(el("ipv").value, 10) || 0;
     var minScore = parseFloat(el("minScore").value) || 0;
+    var directOnly = el("directOnly").checked;
 
     state.filtered = state.channels.filter(function (channel) {
+      if (directOnly && !(channel.streams || []).some(function (s) { return s.direct; })) {
+        return false;
+      }
       if (state.group && channel.group !== state.group) return false;
       if (q && channel.name.toLowerCase().indexOf(q) < 0) return false;
       if (minHeight && height(channel) < minHeight) return false;
@@ -195,6 +199,47 @@
     return list[0] || { url: url, direct: false };
   }
 
+  function canProxy() { return !!state.user; }
+
+  /* 游客只能播「直连」源（浏览器直接去源站拉，不花本站带宽）。
+     没指定具体源时，优先替游客挑一条直连的备用源出来。 */
+  function defaultStream(channel) {
+    var list = channel.streams || [];
+    if (canProxy()) return list[0];
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].direct) return list[i];
+    }
+    return list[0];
+  }
+
+  function needLogin(channelName) {
+    toast((channelName ? channelName + "：" : "") +
+      "这条源要经本站中转，登录后才能在网页播放");
+    showLoginPrompt();
+  }
+
+  function showLoginPrompt() {
+    el("welcomeBody").innerHTML =
+      '<div class="welcome-emoji">🔒</div>' +
+      "<h2>登录后可播放全部频道</h2>" +
+      '<p class="welcome-sub">未登录也能看标「直连」的频道</p>' +
+      "<ul>" +
+        "<li><b>直连频道</b>：浏览器直接从源站拉流，不占本站带宽，免登录即可观看</li>" +
+        "<li><b>中转频道</b>：源站是 http 或不给跨域，必须经本站转发，成本较高，" +
+          "所以留给登录用户</li>" +
+        "<li>无论是否登录，都可以<b>复制地址或下载 m3u</b>，用 VLC 等播放器观看</li>" +
+      "</ul>" +
+      '<button class="primary" id="welcomeEnter">去登录</button>';
+    el("welcomeBox").classList.remove("festive");
+    el("welcomeModal").classList.add("open");
+    el("welcomeEnter").onclick = function () {
+      location.href = "/login?next=" + encodeURIComponent(location.pathname);
+    };
+    el("welcomeModal").onclick = function (event) {
+      if (event.target === el("welcomeModal")) el("welcomeModal").classList.remove("open");
+    };
+  }
+
   function playable(stream, forceProxy) {
     if (stream.direct && !forceProxy) return stream.url;
     return "/proxy?u=" + encodeURIComponent(stream.url);
@@ -243,7 +288,9 @@
           '<span class="stream-label">' + label + "</span>" +
           "<code>" + escapeHtml(stream.url) + "</code>" +
           '<span class="stream-rate">' + humanKbps(stream.kbps) + "</span>" +
-          '<button data-switch="' + escapeHtml(stream.url) + '">播放</button>' +
+          (stream.direct || canProxy()
+            ? '<button data-switch="' + escapeHtml(stream.url) + '">播放</button>'
+            : '<button class="muted" data-needlogin="1">登录后可播</button>') +
         "</div>" +
         '<div class="stream-sub">' +
           '<span class="badge ' + (stream.direct ? "hd" : "") + '">' +
@@ -328,7 +375,12 @@
     remindOnce();
     trackPlay(channel);
 
-    var stream = streamOf(channel, url || channel.url);
+    var stream = url ? streamOf(channel, url) : defaultStream(channel);
+    if (!stream) { toast("这个频道暂时没有可用的源"); return; }
+    if (!stream.direct && !canProxy()) {       // 游客遇到中转源：引导登录
+      needLogin(channel.name);
+      return;
+    }
     var viaProxy = !stream.direct || forceProxy;
     var target = playable(stream, forceProxy);
     if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
@@ -341,6 +393,7 @@
         hlsInstance.on(window.Hls.Events.ERROR, function (_e, data) {
           if (!data.fatal) return;
           if (!viaProxy) {
+            if (!canProxy()) { needLogin(channel.name); return; }
             // 直连失败（多半是上游临时不给 CORS），退回本站中转再试一次
             toast("直连失败，改用本站中转…");
             play(channel, stream.url, true);
@@ -446,6 +499,18 @@
     el("guideCopy").onclick = function () { copy(subscriptionUrl()); };
   }
 
+  function refreshPlayerTip() {
+    var node = document.querySelector(".player-tip-text");
+    if (!node) return;
+    node.innerHTML = state.user
+      ? "<b>网页播放仅供试看</b>（10 分钟自动暂停）。获得完整体验请用 <b>VLC</b>、" +
+        "PotPlayer、Kodi 等直播专用播放器订阅观看——直连源站，更稳、更清晰、" +
+        "可切台、支持后台播放。"
+      : "<b>未登录可直接观看标「直连」的频道</b>（浏览器直接从源站拉流，不占本站带宽）；" +
+        "标「中转」的频道需<a href=\"/login\">登录</a>后在网页播放。" +
+        "无论是否登录，都可以复制地址或下载 m3u，用 <b>VLC</b> 等播放器观看全部频道。";
+  }
+
   function bindPlayerTip() {
     el("tipCopy").onclick = function () { copy(subscriptionUrl()); };
     el("tipDownload").onclick = function () {
@@ -546,12 +611,17 @@
   function loadMe() {
     return fetch("/api/me").then(function (r) { return r.json(); }).then(function (data) {
       state.user = data.user;
-      if (!data.user) { el("userBox").innerHTML = ""; return; }
+      if (!data.user) {
+        el("userBox").innerHTML = '<a href="/login" class="user-chip">登录</a>';
+        refreshPlayerTip();
+        return;
+      }
       el("userBox").innerHTML =
         '<span class="user-chip"><b>' + escapeHtml(data.user.username) + "</b>" +
         (data.user.is_admin ? '<span class="role">管理员</span>' : "") +
         '<button class="link" id="logoutBtn">退出</button></span>' +
         (data.user.is_admin ? ' <a href="/admin">后台</a>' : "");
+      refreshPlayerTip();
       var button = el("logoutBtn");
       if (button) {
         button.onclick = function () {
@@ -596,6 +666,7 @@
     ["q", "quality", "ipv", "minScore"].forEach(function (id) {
       el(id).addEventListener("input", applyFilters);
     });
+    el("directOnly").addEventListener("change", applyFilters);
     el("backups").addEventListener("change", updateSubUrl);
 
     el("groupChips").addEventListener("click", function (event) {
@@ -642,6 +713,8 @@
       }
       var button = event.target.closest("button");
       if (!button) return;
+
+      if (button.dataset.needlogin) { showLoginPrompt(); return; }
 
       if (button.dataset.switch) {
         if (currentChannel) play(currentChannel, button.dataset.switch);

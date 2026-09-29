@@ -426,6 +426,16 @@ def make_handler(cfg: dict, cache: ChannelCache, store: Store, updater: Updater,
                     self._json({"error": "需要管理员身份", "login": True}, 401)
                 return False
 
+            if path == "/proxy" and cfg.get("proxy_require_login", True):
+                if self._user():
+                    return True
+                self._json({
+                    "error": "这条源需要经本站中转，登录后才能在网页里播放；"
+                             "标「直连」的频道免登录即可观看，或复制地址用 VLC 播放",
+                    "login": True,
+                }, 401)
+                return False
+
             if not auth.require_login or self._user():
                 return True
 

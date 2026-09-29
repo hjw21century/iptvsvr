@@ -16,8 +16,13 @@ DEFAULTS: Dict[str, Any] = {
     # 对外访问地址，用于播放列表头部标注来源；留空则不输出
     "site_url": "",
 
-    # 登录认证：前台是否必须登录才能浏览/播放（播放器可用账号的订阅密钥访问）
-    "require_login": True,
+    # 登录认证
+    #   require_login       前台是否必须登录才能浏览（默认否，首页公开）
+    #   proxy_require_login 网页内"中转播放"是否需要登录（默认是）——
+    #                       直连源由浏览器自己去拉，不花本站带宽，游客也能看；
+    #                       中转要消耗本站流量，所以留给登录用户
+    "require_login": False,
+    "proxy_require_login": True,
     "session_days": 14,
 
     # 网页内播放用的中转：浏览器有混合内容与跨域限制，必须经本站转一道。
