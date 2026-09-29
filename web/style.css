@@ -114,8 +114,6 @@ footer { color: var(--text-dim); font-size: 12px; text-align: center; margin-top
 .modal .box .body { padding: 14px; }
 video { width: 100%; background: #000; border-radius: 8px; aspect-ratio: 16/9; }
 .stream-list { margin-top: 12px; font-size: 12px; }
-.stream-list div { display: flex; gap: 10px; padding: 6px 0; border-top: 1px solid var(--border); align-items: center; }
-.stream-list code { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 
 .toast { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); background: var(--bg-elev-2); border: 1px solid var(--border); color: var(--text); padding: 9px 16px; border-radius: 999px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; }
 .toast.show { opacity: 1; }
@@ -190,38 +188,70 @@ table.compact td, table.compact th { padding: 5px 8px; font-size: 12px; }
 .box.narrow { width: min(520px, 100%); }
 
 /* ---------------------------------------------------------- 播放源反馈 */
-.stream-row { border-top: 1px solid var(--border); padding: 8px 0; }
+.stream-row { border-top: 1px solid var(--border); padding: 10px 0; }
 .stream-row:first-child { border-top: none; }
-.stream-main { display: flex; gap: 10px; align-items: center; }
-.stream-main code { flex: 1; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.stream-sub { display: flex; gap: 10px; align-items: center; margin-top: 4px; font-size: 12px; color: var(--text-dim); }
+.stream-main {
+  display: grid; grid-template-columns: auto 1fr auto auto;
+  gap: 10px; align-items: center;
+}
+.stream-main .stream-label { color: var(--text-dim); white-space: nowrap; }
+.stream-main code {
+  color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  min-width: 0;
+}
+.stream-main .stream-rate { white-space: nowrap; color: var(--text-dim); }
+.stream-main button { white-space: nowrap; }
+.stream-sub {
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+  margin-top: 6px; font-size: 12px; color: var(--text-dim);
+}
 .fb-good { color: var(--ok); }
 .fb-bad { color: var(--warn); }
 
 button.link { background: none; border: none; color: var(--accent); padding: 0; font-size: 12px; cursor: pointer; }
 button.link:hover { text-decoration: underline; }
 
-.fb-panel { margin-top: 8px; padding: 10px; background: var(--bg-elev-2); border-radius: 8px; }
+.fb-panel { margin-top: 10px; padding: 12px; background: var(--bg-elev-2); border-radius: 8px; }
 .fb-panel.hidden { display: none; }
-.fb-kinds { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
-.fb-kinds .chip { font-size: 12px; }
-.fb-form { display: flex; gap: 8px; flex-wrap: wrap; }
-.fb-form input {
-  background: var(--bg-elev); color: var(--text); border: 1px solid var(--border);
-  border-radius: 6px; padding: 6px 9px; font-size: 13px;
+.fb-hint { color: var(--text-dim); font-size: 12px; margin-bottom: 8px; line-height: 1.7; }
+.fb-hint b { color: var(--text); font-weight: 600; }
+
+/* 一按即提交：手机上最重要的是点得到、点得准 */
+.fb-kinds { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 8px; }
+.fb-kinds .chip {
+  font-size: 13px; padding: 9px 6px; text-align: center; border-radius: 8px;
+  background: var(--bg-elev); line-height: 1.3;
 }
-.fb-form .fb-nick { width: 130px; }
-.fb-form .fb-msg { flex: 1; min-width: 180px; }
-.fb-list { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
-.fb-item { display: flex; gap: 8px; align-items: baseline; font-size: 12px; flex-wrap: wrap; }
-.fb-item b { color: var(--text); }
-.fb-item time { color: var(--text-dim); margin-left: auto; font-size: 11px; }
-.fb-tag { border: 1px solid var(--border); border-radius: 999px; padding: 0 7px; color: var(--text-dim); }
+.fb-kinds .chip:active { transform: scale(.97); }
+
+.fb-more { margin-top: 10px; }
+.fb-more textarea {
+  width: 100%; min-height: 62px; resize: vertical; box-sizing: border-box;
+  background: var(--bg-elev); color: var(--text); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 10px; font-size: 13px; font-family: inherit;
+}
+.fb-more .fb-actions { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+.fb-more .fb-actions .sub { flex: 1; font-size: 11px; color: var(--text-dim); }
+
+.fb-list { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+.fb-item {
+  display: grid; grid-template-columns: auto 1fr; gap: 4px 8px;
+  font-size: 12px; padding-top: 8px; border-top: 1px solid var(--border);
+}
+.fb-item:first-child { border-top: none; padding-top: 0; }
+.fb-item .fb-who { color: var(--text); font-weight: 600; }
+.fb-item .fb-meta { color: var(--text-dim); grid-column: 1 / -1; font-size: 11px; }
+.fb-item .fb-text { grid-column: 1 / -1; color: var(--text-dim); line-height: 1.7; }
+.fb-tag { border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; color: var(--text-dim); justify-self: start; }
 
 @media (max-width: 720px) {
-  .stream-main code { max-width: 140px; }
-  .fb-form .fb-nick { width: 100%; }
+  .stream-main { grid-template-columns: auto 1fr auto; }
+  .stream-main .stream-rate { grid-column: 2; grid-row: 2; justify-self: start; }
+  .stream-main code { grid-column: 2; }
+  .fb-kinds { grid-template-columns: repeat(2, 1fr); }
 }
+
+
 
 .stream-tip {
   font-size: 12px; color: var(--text-dim); line-height: 1.7;

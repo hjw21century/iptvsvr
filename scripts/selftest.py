@@ -4,6 +4,7 @@
     python3 scripts/selftest.py
 """
 
+import json
 import os
 import sys
 import tempfile
@@ -551,7 +552,7 @@ class TestFeedback(unittest.TestCase):
         listing = self.service.listing(url="http://a/1.m3u8")
         self.assertEqual(listing["total"], 1)
         self.assertEqual(listing["items"][0]["kind_label"], "卡顿/缓冲")
-        self.assertEqual(listing["items"][0]["nickname"], "匿名")
+        self.assertEqual(listing["items"][0]["who"], "1.2.3.*")   # 身份来自 IP
 
     def test_rejects_unknown_stream_and_bad_kind(self):
         self.assertEqual(self.service.submit(
@@ -572,11 +573,38 @@ class TestFeedback(unittest.TestCase):
             {"url": "http://a/1.m3u8", "kind": "lag", "message": "再来一条"}, "6.6.6.6")
         self.assertEqual(status, 429)
 
-    def test_ip_is_not_stored_in_clear(self):
+    def test_rate_limit_key_is_hashed(self):
         self.service.submit({"url": "http://a/1.m3u8", "kind": "ok"}, "9.9.9.9")
         rows = self.store.list_feedback(url="http://a/1.m3u8")["items"]
-        self.assertNotIn("9.9.9.9", rows[0]["client"])
+        self.assertNotIn("9.9.9.9", rows[0]["client"])   # 限流用的键是哈希
         self.assertEqual(len(rows[0]["client"]), 16)
+
+    def test_identity_comes_from_server_not_client(self):
+        """提交者填什么昵称都不作数，身份一律按服务端看到的 IP 记。"""
+        self.service.submit({"url": "http://a/1.m3u8", "kind": "ok",
+                             "nickname": "管理员"}, "203.0.113.45",
+                            "Mozilla/5.0 (iPhone) Safari")
+        row = self.store.list_feedback(url="http://a/1.m3u8")["items"][0]
+        self.assertEqual(row["ip"], "203.0.113.45")      # 完整 IP 只在库里/后台
+        self.assertEqual(row["nickname"], "203.0.113.*")  # 展示用的是打码 IP
+        self.assertNotIn("管理员", json.dumps(dict(row), ensure_ascii=False))
+        self.assertIn("iPhone", row["device"])
+
+    def test_public_listing_masks_ip(self):
+        self.service.submit({"url": "http://a/1.m3u8", "kind": "ok"}, "203.0.113.45")
+        listing = self.service.listing(url="http://a/1.m3u8", remote_ip="198.51.100.7")
+        self.assertEqual(listing["items"][0]["who"], "203.0.113.*")
+        self.assertNotIn("ip", listing["items"][0])       # 完整 IP 不进公开接口
+        self.assertEqual(listing["you"], "198.51.100.*")
+
+    def test_mask_and_device(self):
+        from iptvhub.feedback import describe_device, mask_ip
+        self.assertEqual(mask_ip("1.2.3.4"), "1.2.3.*")
+        self.assertEqual(mask_ip("2401:c080:1400:abcd::1"), "2401:c080:1400::*")
+        self.assertEqual(mask_ip(""), "未知来源")
+        self.assertEqual(describe_device("Mozilla/5.0 (iPhone) MicroMessenger/8.0"), "微信")
+        self.assertIn("Android", describe_device("Mozilla/5.0 (Linux; Android 14) Chrome/120"))
+        self.assertEqual(describe_device(""), "")
 
     def test_text_is_trimmed(self):
         from iptvhub.feedback import MAX_MESSAGE, clean_text

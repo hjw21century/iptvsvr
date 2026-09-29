@@ -22,11 +22,48 @@ GOOD_KINDS = ("ok",)
 BAD_KINDS = ("lag", "black", "nosound", "dead")
 
 MAX_MESSAGE = 300
-MAX_NICKNAME = 24
 WINDOW_SECONDS = 600
 MAX_PER_WINDOW = 10
 
 _CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+# 设备识别只用于后台排查（"是不是同一个人在刷"），做粗粒度即可
+_DEVICE_HINTS = (
+    ("micromessenger", "微信"), ("iphone", "iPhone"), ("ipad", "iPad"),
+    ("android", "Android"), ("windows", "Windows"), ("macintosh", "Mac"),
+    ("cros", "ChromeOS"), ("linux", "Linux"),
+)
+_BROWSER_HINTS = (
+    ("micromessenger", "微信"), ("edg/", "Edge"), ("firefox", "Firefox"),
+    ("chrome", "Chrome"), ("safari", "Safari"), ("vlc", "VLC"), ("curl", "curl"),
+)
+
+
+def mask_ip(ip: str) -> str:
+    """公开展示用的打码 IP：1.2.3.* / 2401:abcd:ef::*"""
+    ip = (ip or "").strip()
+    if not ip:
+        return "未知来源"
+    if ":" in ip:                                   # IPv6
+        parts = [p for p in ip.split(":") if p][:3]
+        return ":".join(parts) + "::*" if parts else "未知来源"
+    parts = ip.split(".")
+    if len(parts) == 4:
+        return "%s.%s.%s.*" % (parts[0], parts[1], parts[2])
+    return ip
+
+
+def describe_device(user_agent: str) -> str:
+    """从 UA 里粗略提取"设备 · 浏览器"，识别不出就留空。"""
+    lowered = (user_agent or "").lower()
+    if not lowered:
+        return ""
+    device = next((label for token, label in _DEVICE_HINTS if token in lowered), "")
+    browser = next((label for token, label in _BROWSER_HINTS if token in lowered), "")
+    parts = [part for part in (device, browser) if part]
+    if len(parts) == 2 and parts[0] == parts[1]:   # 微信内置浏览器会两项都命中
+        parts = parts[:1]
+    return " · ".join(parts)[:40]
 
 
 def clean_text(text: Any, limit: int) -> str:
@@ -69,7 +106,7 @@ class FeedbackService:
         url = str(payload.get("url") or "").strip()
         kind = str(payload.get("kind") or "other").strip().lower()
         message = clean_text(payload.get("message"), MAX_MESSAGE)
-        nickname = clean_text(payload.get("nickname"), MAX_NICKNAME)
+        # 身份不接受客户端传值：一律用服务端看到的来源 IP，提交者改不了
 
         if kind not in KINDS:
             return 400, {"error": "未知的反馈类型"}
@@ -93,12 +130,14 @@ class FeedbackService:
             return 409, {"error": "刚刚已经提交过相同内容"}
 
         feedback_id = self.store.add_feedback(
-            url=url, kind=kind, message=message, nickname=nickname,
-            channel_key=row["channel_key"], channel_name=row["display_name"], client=client)
-        return 200, {"id": feedback_id, "message": "感谢反馈"}
+            url=url, kind=kind, message=message, nickname=mask_ip(remote_ip),
+            channel_key=row["channel_key"], channel_name=row["display_name"], client=client,
+            ip=remote_ip, device=describe_device(user_agent))
+        return 200, {"id": feedback_id, "message": "感谢反馈",
+                     "who": mask_ip(remote_ip)}
 
     def listing(self, url: str = "", channel_key: str = "",
-                limit: int = 30) -> Dict[str, Any]:
+                limit: int = 30, remote_ip: str = "") -> Dict[str, Any]:
         data = self.store.list_feedback(url=url, channel_key=channel_key,
                                         limit=max(1, min(int(limit), 100)))
         items = []
@@ -109,7 +148,9 @@ class FeedbackService:
                 "kind": row["kind"],
                 "kind_label": KINDS.get(row["kind"], row["kind"]),
                 "message": row["message"],
-                "nickname": row["nickname"] or "匿名",
+                # 公开列表只给打码 IP；完整 IP 只在后台可见
+                "who": row["nickname"] or mask_ip(row["ip"]),
+                "device": row["device"] or "",
                 "channel_name": row["channel_name"],
                 "created_at": row["created_at"],
             })
@@ -118,6 +159,7 @@ class FeedbackService:
             "items": items,
             "summary": self.store.feedback_summary(channel_key=channel_key),
             "kinds": KINDS,
+            "you": mask_ip(remote_ip) if remote_ip else "",
         }
 
 

@@ -553,7 +553,8 @@ def make_handler(cfg: dict, cache: ChannelCache, store: Store, updater: Updater,
                 self._json(feedback.listing(
                     url=query.get("url", [""])[0],
                     channel_key=query.get("channel", [""])[0],
-                    limit=int(float(query.get("limit", ["30"])[0] or 30))))
+                    limit=int(float(query.get("limit", ["30"])[0] or 30)),
+                    remote_ip=self._client_ip()))
                 return
 
             if path == "/api/runs":

@@ -211,7 +211,7 @@
     ["ok", "能正常看"], ["lag", "卡顿/缓冲"], ["black", "黑屏/花屏"],
     ["nosound", "没有声音"], ["dead", "打不开"], ["other", "其它"]
   ];
-  var feedbackState = { summary: {}, items: [], openUrl: "" };
+  var feedbackState = { summary: {}, items: [], openUrl: "", you: "" };
 
   function feedbackBadges(url) {
     var counts = feedbackState.summary[url] || {};
@@ -227,39 +227,76 @@
     var head = '<div class="stream-tip">网页播放仅供试看（10 分钟自动暂停）。' +
       '标「直连」的源由浏览器直接拉取，不占本站流量；标「中转」的源受每日配额限制。' +
       '长期观看请 <a href="/channel.m3u?key=' + encodeURIComponent(channel.key) +
-      '" download>下载本频道 m3u</a> 用 VLC 等播放器打开。</div>';
+      '" download>下载本频道 m3u</a>，用 VLC 等播放器打开。</div>';
+
     el("streamList").innerHTML = head + (channel.streams || []).map(function (stream, index) {
       var label = index === 0 ? "主源" : "备用" + index;
       var mine = feedbackState.items.filter(function (item) { return item.url === stream.url; });
+      var open = feedbackState.openUrl === stream.url;
       return '<div class="stream-row" data-url="' + escapeHtml(stream.url) + '">' +
         '<div class="stream-main">' +
-          "<span>" + label + "</span>" +
+          '<span class="stream-label">' + label + "</span>" +
           "<code>" + escapeHtml(stream.url) + "</code>" +
-          "<span>" + humanKbps(stream.kbps) + "</span>" +
+          '<span class="stream-rate">' + humanKbps(stream.kbps) + "</span>" +
           '<button data-switch="' + escapeHtml(stream.url) + '">播放</button>' +
         "</div>" +
-        '<div class="stream-sub">' + feedbackBadges(stream.url) +
-          '<button class="link" data-fb="' + escapeHtml(stream.url) + '">留言反馈' +
-          (mine.length ? "（" + mine.length + "）" : "") + "</button></div>" +
-        '<div class="fb-panel' + (feedbackState.openUrl === stream.url ? "" : " hidden") +
+        '<div class="stream-sub">' +
+          '<span class="badge ' + (stream.direct ? "hd" : "") + '">' +
+            (stream.direct ? "直连" : "中转") + "</span>" +
+          feedbackBadges(stream.url) +
+          '<button class="link" data-fb="' + escapeHtml(stream.url) + '">' +
+            (open ? "收起反馈" : "反馈这条源") +
+            (mine.length ? "（" + mine.length + "）" : "") + "</button>" +
+        "</div>" +
+        '<div class="fb-panel' + (open ? "" : " hidden") +
           '" data-panel="' + escapeHtml(stream.url) + '">' +
+          '<div class="fb-hint">看到什么情况，<b>点一下就提交</b>，不用填任何信息。' +
+            "系统会自动记录你的来源 IP（" + escapeHtml(feedbackState.you || "自动识别") +
+            "），仅用于识别重复提交，不可修改。</div>" +
           '<div class="fb-kinds">' + FEEDBACK_KINDS.map(function (kind) {
-            return '<button class="chip" data-kind="' + kind[0] + '">' + kind[1] + "</button>";
+            return '<button class="chip" data-kind="' + kind[0] +
+              '" data-url="' + escapeHtml(stream.url) + '">' + kind[1] + "</button>";
           }).join("") + "</div>" +
-          '<div class="fb-form">' +
-            '<input type="text" class="fb-nick" maxlength="24" placeholder="昵称（可选）">' +
-            '<input type="text" class="fb-msg" maxlength="300" placeholder="说点什么，例如：晚上高峰卡顿">' +
-            '<button class="primary" data-send="' + escapeHtml(stream.url) + '">提交</button>' +
+          '<div class="fb-more">' +
+            '<textarea class="fb-msg" maxlength="300" ' +
+              'placeholder="想多说两句？（选填，例如：晚上八点后卡顿严重）"></textarea>' +
+            '<div class="fb-actions"><span class="sub">填了说明就点这里提交，' +
+              "默认归为「其它」</span>" +
+              '<button class="primary" data-send="' + escapeHtml(stream.url) + '">提交说明</button>' +
+            "</div>" +
           "</div>" +
           '<div class="fb-list">' + (mine.length ? mine.map(function (item) {
-            return '<div class="fb-item"><b>' + escapeHtml(item.nickname) + "</b>" +
+            return '<div class="fb-item">' +
+              '<span class="fb-who">' + escapeHtml(item.who || "访客") + "</span>" +
               '<span class="fb-tag">' + escapeHtml(item.kind_label) + "</span>" +
-              "<span>" + escapeHtml(item.message) + "</span>" +
-              '<time>' + new Date(item.created_at * 1000).toLocaleString("zh-CN",
-                { hour12: false }) + "</time></div>";
-          }).join("") : '<div class="sub">还没有反馈，欢迎第一个留言</div>') + "</div>" +
+              (item.message ? '<span class="fb-text">' + escapeHtml(item.message) + "</span>" : "") +
+              '<span class="fb-meta">' +
+                new Date(item.created_at * 1000).toLocaleString("zh-CN", { hour12: false }) +
+                (item.device ? " · " + escapeHtml(item.device) : "") + "</span>" +
+            "</div>";
+          }).join("") : '<div class="fb-hint">还没有人反馈这条源，欢迎第一个</div>') + "</div>" +
         "</div></div>";
     }).join("");
+  }
+
+  function submitFeedback(url, kind, message, button) {
+    if (button) button.disabled = true;
+    return fetch("/api/feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: url, kind: kind, message: message || "" })
+    }).then(function (r) {
+      return r.json().then(function (payload) { return { ok: r.ok, payload: payload }; });
+    }).then(function (result) {
+      if (!result.ok) { toast(result.payload.error || "提交失败"); return false; }
+      toast("已收到，感谢反馈");
+      if (currentChannel) loadFeedback(currentChannel);
+      return true;
+    }).catch(function () { toast("提交失败"); return false; })
+      .then(function (ok) {
+        if (button) button.disabled = false;
+        return ok;
+      });
   }
 
   function loadFeedback(channel) {
@@ -268,6 +305,7 @@
       .then(function (data) {
         feedbackState.summary = data.summary || {};
         feedbackState.items = data.items || [];
+        feedbackState.you = data.you || "";
         renderStreams(channel);
       }).catch(function () { renderStreams(channel); });
   }
@@ -492,40 +530,27 @@
         return;
       }
 
+      // 点一下类型就直接提交，顺带捎上已经填好的补充说明
       if (button.dataset.kind) {
-        var group = button.closest(".fb-kinds");
-        group.querySelectorAll(".chip").forEach(function (chip) {
-          chip.classList.toggle("active", chip === button);
+        var panel = button.closest(".fb-panel");
+        var note = panel.querySelector(".fb-msg");
+        submitFeedback(button.dataset.url, button.dataset.kind,
+                       note ? note.value : "", button).then(function (ok) {
+          if (ok && note) note.value = "";
         });
         return;
       }
 
       if (button.dataset.send) {
-        var panel = button.closest(".fb-panel");
-        var active = panel.querySelector(".chip.active");
-        var body = {
-          url: button.dataset.send,
-          kind: active ? active.dataset.kind : "other",
-          nickname: panel.querySelector(".fb-nick").value,
-          message: panel.querySelector(".fb-msg").value
-        };
-        if (!active && !body.message.trim()) {
-          toast("请先选一个情况，或写点说明");
+        var box = button.closest(".fb-panel").querySelector(".fb-msg");
+        var text = box ? box.value.trim() : "";
+        if (!text) {
+          toast("先写点说明，或直接点上面的选项");
           return;
         }
-        button.disabled = true;
-        fetch("/api/feedback", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body)
-        }).then(function (r) {
-          return r.json().then(function (payload) { return { ok: r.ok, payload: payload }; });
-        }).then(function (result) {
-          if (!result.ok) { toast(result.payload.error || "提交失败"); return; }
-          toast("感谢反馈");
-          if (currentChannel) loadFeedback(currentChannel);
-        }).catch(function () { toast("提交失败"); })
-          .then(function () { button.disabled = false; });
+        submitFeedback(button.dataset.send, "other", text, button).then(function (ok) {
+          if (ok && box) box.value = "";
+        });
       }
     });
 

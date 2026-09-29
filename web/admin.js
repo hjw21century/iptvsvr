@@ -286,14 +286,15 @@
           "<td>" + esc(item.channel_name || "—") + "</td>" +
           '<td class="' + (bad ? "state-bad" : "state-ok") + '">' + esc(label) + "</td>" +
           "<td>" + esc(item.message || "—") + "</td>" +
-          '<td class="hide-sm">' + esc(item.nickname || "匿名") + "</td>" +
-          '<td class="hide-sm"><code>' + esc((item.url || "").slice(0, 44)) + "</code></td>" +
+          "<td><code>" + esc(item.ip || "—") + "</code></td>" +
+          '<td class="hide-sm">' + esc(item.device || "—") + "</td>" +
+          '<td class="hide-sm"><code>' + esc((item.url || "").slice(0, 40)) + "</code></td>" +
           '<td><div class="row-actions">' +
             '<button data-fbhide="' + item.id + '" data-to="' + (item.hidden ? 0 : 1) + '">' +
               (item.hidden ? "取消隐藏" : "隐藏") + "</button>" +
             '<button data-fbdel="' + item.id + '">删除</button>' +
           "</div></td></tr>";
-      }).join("") || '<tr><td colspan="7" class="empty">暂无反馈</td></tr>';
+      }).join("") || '<tr><td colspan="8" class="empty">暂无反馈</td></tr>';
     }).catch(function (err) { toast("加载失败：" + err.message); });
   }
 

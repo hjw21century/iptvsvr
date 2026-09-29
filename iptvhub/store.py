@@ -84,6 +84,8 @@ CREATE TABLE IF NOT EXISTS feedback (
     message      TEXT DEFAULT '',
     nickname     TEXT DEFAULT '',
     client       TEXT DEFAULT '',
+    ip           TEXT DEFAULT '',
+    device       TEXT DEFAULT '',
     created_at   INTEGER NOT NULL,
     hidden       INTEGER DEFAULT 0
 );
@@ -118,6 +120,13 @@ class Store:
             if column not in existing:
                 with conn:
                     conn.execute("ALTER TABLE streams ADD COLUMN %s" % ddl)
+
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(feedback)")}
+        for column, ddl in (("ip", "ip TEXT DEFAULT ''"),
+                            ("device", "device TEXT DEFAULT ''")):
+            if column not in existing:
+                with conn:
+                    conn.execute("ALTER TABLE feedback ADD COLUMN %s" % ddl)
 
     # ------------------------------------------------------------- 连接管理
     def _connect(self) -> sqlite3.Connection:
@@ -286,16 +295,17 @@ class Store:
 
     # ------------------------------------------------------------------ 反馈
     def add_feedback(self, url: str, kind: str, message: str = "", nickname: str = "",
-                     channel_key: str = "", channel_name: str = "", client: str = "") -> int:
+                     channel_key: str = "", channel_name: str = "", client: str = "",
+                     ip: str = "", device: str = "") -> int:
         with self._write_lock:
             conn = self._connect()
             with conn:
                 cur = conn.execute(
                     """INSERT INTO feedback (url, channel_key, channel_name, kind, message,
-                                             nickname, client, created_at)
-                       VALUES (?,?,?,?,?,?,?,?)""",
+                                             nickname, client, ip, device, created_at)
+                       VALUES (?,?,?,?,?,?,?,?,?,?)""",
                     (url, channel_key, channel_name, kind, message, nickname, client,
-                     int(time.time())))
+                     ip, device, int(time.time())))
                 return cur.lastrowid
 
     def list_feedback(self, url: str = "", channel_key: str = "", kind: str = "",
