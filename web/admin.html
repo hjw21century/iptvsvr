@@ -21,6 +21,7 @@
     <button class="tab active" data-tab="overview">概览与运行</button>
     <button class="tab" data-tab="sources">上游源</button>
     <button class="tab" data-tab="streams">源明细排查</button>
+    <button class="tab" data-tab="traffic">流量与访客</button>
     <button class="tab" data-tab="feedback">观众反馈</button>
     <button class="tab" data-tab="settings">参数</button>
   </nav>
@@ -117,6 +118,43 @@
     </div>
   </section>
 
+  <!-- ------------------------------------------------ 流量与访客 -->
+  <section class="tabpage hidden" id="page-traffic">
+    <div class="tiles" id="trafficTiles"></div>
+
+    <div class="panel">
+      <div class="controls">
+        <select id="trafficDays">
+          <option value="7">最近 7 天</option>
+          <option value="14" selected>最近 14 天</option>
+          <option value="30">最近 30 天</option>
+        </select>
+        <button id="trafficReload" class="primary">刷新</button>
+        <button id="trafficTable">查看数据表</button>
+        <span class="sub" id="trafficRange"></span>
+      </div>
+      <div id="quotaMeter"></div>
+      <div class="charts" id="trafficCharts"></div>
+      <div class="hidden" id="trafficTableBox"></div>
+    </div>
+
+    <div class="cols">
+      <div class="panel">
+        <h3>今日访客（按用量排序）</h3>
+        <table class="compact"><thead><tr>
+          <th>来源 IP</th><th class="hide-sm">设备</th><th>请求</th>
+          <th>播放</th><th>中转流量</th><th class="hide-sm">最后活跃</th>
+        </tr></thead><tbody id="visitorsBody"></tbody></table>
+      </div>
+      <div class="panel">
+        <h3>今日热门频道</h3>
+        <table class="compact"><thead><tr>
+          <th>频道</th><th style="width:60px">播放</th><th style="width:110px"></th>
+        </tr></thead><tbody id="hotChannelsBody"></tbody></table>
+      </div>
+    </div>
+  </section>
+
   <!-- ------------------------------------------------ 观众反馈 -->
   <section class="tabpage hidden" id="page-feedback">
     <div class="panel">
@@ -173,6 +211,7 @@
   </div>
 </div>
 
+<div class="chart-tip" id="chartTip"></div>
 <div class="toast" id="toast"></div>
 <script src="static/admin.js"></script>
 </body>

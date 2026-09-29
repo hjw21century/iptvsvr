@@ -323,6 +323,7 @@
     renderStreams(channel);
     loadFeedback(channel);
     remindOnce();
+    trackPlay(channel);
 
     var stream = streamOf(channel, url || channel.url);
     var viaProxy = !stream.direct || forceProxy;
@@ -358,6 +359,21 @@
       video.play().catch(function () { /* 需要用户手势，忽略 */ });
       startSessionTimer(video);
     });
+  }
+
+  /* 播放上报：只报频道，身份由服务端按来源 IP 归并，用于后台的热门频道统计 */
+  function trackPlay(channel) {
+    try {
+      var body = JSON.stringify({ event: "play", key: channel.key, name: channel.name });
+      if (navigator.sendBeacon) {
+        navigator.sendBeacon("/api/track", new Blob([body], { type: "application/json" }));
+      } else {
+        fetch("/api/track", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: body, keepalive: true
+        }).catch(function () {});
+      }
+    } catch (e) { /* 统计失败不影响播放 */ }
   }
 
   function startSessionTimer(video) {

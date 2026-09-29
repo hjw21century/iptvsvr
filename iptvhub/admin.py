@@ -53,6 +53,7 @@ class AdminApi:
         self.cache = cache
         self.proxy = proxy
         self.feedback = None          # 由 serve() 注入
+        self.analytics = None
         self._token: Optional[str] = None
 
     # ------------------------------------------------------------------ 鉴权
@@ -91,6 +92,7 @@ class AdminApi:
             "GET /config": self._config,
             "GET /streams": self._streams,
             "GET /feedback": self._feedback,
+            "GET /analytics": self._analytics,
             "GET /history": self._history,
             "POST /update": self._update,
             "POST /export": self._export,
@@ -197,6 +199,18 @@ class AdminApi:
         data["adjustments"] = {url: score_adjustment(counts)
                                for url, counts in summary.items()}
         return 200, data
+
+    def _analytics(self, query, body):
+        if not self.analytics:
+            return 503, {"error": "统计未启用"}
+        days = max(3, min(int(float(query.get("days", ["14"])[0] or 14)), 90))
+        day = query.get("day", [""])[0] or None
+        payload = self.analytics.overview(days)
+        payload["visitors"] = self.analytics.visitors(day, limit=20)
+        payload["channels"] = self.analytics.channels(day, limit=15)
+        payload["proxy"] = self.proxy.meter.snapshot() if self.proxy else None
+        payload["feedback_stats"] = self.store.feedback_stats()
+        return 200, payload
 
     def _hide_feedback(self, query, body):
         changed = self.store.set_feedback_hidden(int(body.get("id") or 0),

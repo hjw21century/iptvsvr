@@ -8,6 +8,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -454,6 +455,71 @@ class TestDirectPlayback(unittest.TestCase):
         plain = rank.score_row(dict(base, direct=0), weights, 0.4)
         direct = rank.score_row(dict(base, direct=1), weights, 0.4)
         self.assertGreater(direct, plain)
+
+
+class TestAnalytics(unittest.TestCase):
+    """访客与流量统计：按天聚合、UV 去重、频道榜、清理。"""
+
+    def setUp(self):
+        from iptvhub.analytics import Analytics
+        handle, self.path = tempfile.mkstemp(suffix=".db")
+        os.close(handle)
+        os.unlink(self.path)
+        self.store = Store(self.path)
+        self.analytics = Analytics(self.store, lambda: b"secret", flush_every=1000)
+
+    def tearDown(self):
+        self.store.close()
+        for suffix in ("", "-wal", "-shm"):
+            if os.path.exists(self.path + suffix):
+                os.unlink(self.path + suffix)
+
+    def test_counts_and_unique_visitors(self):
+        for _ in range(3):
+            self.analytics.record("page", "1.1.1.1", "iPhone Safari")
+        self.analytics.record("page", "2.2.2.2", "Chrome")
+        overview = self.analytics.overview(3)
+        self.assertEqual(overview["today"]["page"], 4)
+        self.assertEqual(overview["today"]["visitors"], 2)      # 同一人多次只算一个
+
+    def test_bytes_and_top_visitors(self):
+        self.analytics.record("proxy", "3.3.3.3", "VLC", size=5 << 20)
+        self.analytics.record("proxy", "4.4.4.4", "Chrome", size=1 << 20)
+        visitors = self.analytics.visitors()
+        self.assertEqual(visitors[0]["ip"], "3.3.3.3")          # 按流量排序
+        self.assertEqual(visitors[0]["mb"], 5.0)
+        self.assertEqual(visitors[0]["masked"], "3.3.3.*")
+        self.assertEqual(self.analytics.overview(2)["today"]["proxy_mb"], 6.0)
+
+    def test_channel_ranking(self):
+        for _ in range(3):
+            self.analytics.record("play", "1.1.1.1", "x", channel_key="CCTV1",
+                                  channel_name="CCTV1")
+        self.analytics.record("play", "1.1.1.1", "x", channel_key="HNTV", channel_name="湖南卫视")
+        top = self.analytics.channels()
+        self.assertEqual(top[0]["channel_key"], "CCTV1")
+        self.assertEqual(top[0]["plays"], 3)
+
+    def test_series_covers_requested_days(self):
+        overview = self.analytics.overview(7)
+        self.assertEqual(len(overview["series"]), 7)
+        self.assertEqual(overview["series"][-1]["raw_day"], time.strftime("%Y%m%d"))
+        self.assertTrue(all(row["visitors"] == 0 for row in overview["series"][:-1]))
+
+    def test_flush_is_idempotent(self):
+        self.analytics.record("page", "1.1.1.1")
+        self.analytics.flush()
+        self.analytics.flush()
+        self.assertEqual(self.analytics.overview(1)["today"]["page"], 1)
+
+    def test_prune_old_days(self):
+        self.analytics.record("page", "1.1.1.1")
+        self.analytics.flush()
+        conn = self.store._connect()
+        with conn:
+            conn.execute("UPDATE daily_metrics SET day='20200101'")
+            conn.execute("UPDATE daily_visitors SET day='20200101'")
+        self.assertGreater(self.analytics.prune(keep_days=30), 0)
 
 
 class TestProxyMeter(unittest.TestCase):

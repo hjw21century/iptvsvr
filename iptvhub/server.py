@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 
 from . import export
 from .admin import AdminApi
+from .analytics import Analytics
 from .config import load_config
 from .feedback import FeedbackService
 from .netclient import HttpClient
@@ -136,7 +137,8 @@ class Updater:
 
 
 def make_handler(cfg: dict, cache: ChannelCache, store: Store, updater: Updater,
-                 admin: AdminApi, proxy: StreamProxy, feedback: FeedbackService):
+                 admin: AdminApi, proxy: StreamProxy, feedback: FeedbackService,
+                 analytics: Analytics):
     web_dir = cfg["paths"]["web"]
     data_dir = cfg["paths"]["data"]
     admin_token = (cfg["server"].get("admin_token") or "").strip()
@@ -202,6 +204,7 @@ def make_handler(cfg: dict, cache: ChannelCache, store: Store, updater: Updater,
                 return
 
             try:
+                self._track(path)
                 self._route(path, query)
             except BrokenPipeError:
                 pass
@@ -337,6 +340,26 @@ def make_handler(cfg: dict, cache: ChannelCache, store: Store, updater: Updater,
                 pass
             finally:
                 meter.add(client, sent)
+                analytics.record("proxy", client, self.headers.get("User-Agent", ""),
+                                 size=sent)
+
+        def _track(self, path: str) -> None:
+            """按路径把请求归类记账；后台页面与其轮询接口不算访客。"""
+            if path.startswith("/admin") or path.startswith("/api/admin"):
+                return
+            if path.startswith("/static") or path in ("/healthz", "/favicon.ico"):
+                return
+            if path == "/proxy":
+                return                      # 中转在 _proxy 里连同字节数一起记
+            if path == "/":
+                kind = "page"
+            elif path.startswith("/playlist") or path == "/channel.m3u":
+                kind = "playlist"
+            elif path.startswith("/api/"):
+                kind = "api"
+            else:
+                return
+            analytics.record(kind, self._client_ip(), self.headers.get("User-Agent", ""))
 
         def _client_ip(self) -> str:
             forwarded = self.headers.get("X-Forwarded-For", "")
@@ -366,10 +389,24 @@ def make_handler(cfg: dict, cache: ChannelCache, store: Store, updater: Updater,
                 if path.startswith("/api/admin"):
                     self._admin(path, query, "POST")
                     return
+                if path == "/api/track":
+                    body = self._read_body()
+                    event = str(body.get("event") or "")[:16]
+                    if event == "play":
+                        analytics.record("play", self._client_ip(),
+                                         self.headers.get("User-Agent", ""),
+                                         channel_key=str(body.get("key") or "")[:64],
+                                         channel_name=str(body.get("name") or "")[:64])
+                    self._json({"ok": True})
+                    return
+
                 if path == "/api/feedback":
                     status, result = feedback.submit(
                         self._read_body(), self._client_ip(),
                         self.headers.get("User-Agent", ""))
+                    if status == 200:
+                        analytics.record("feedback", self._client_ip(),
+                                         self.headers.get("User-Agent", ""))
                     self._json(result, status)
                     return
                 if path == "/api/update":
@@ -589,10 +626,12 @@ def serve(cfg: dict) -> None:
     proxy = StreamProxy(cfg, store, HttpClient(cfg))
     admin = AdminApi(cfg, store, updater, cache, proxy)
     feedback = FeedbackService(store, proxy.secret)
+    analytics = Analytics(store, proxy.secret)
     admin.feedback = feedback
+    admin.analytics = analytics
     attach_log_ring()
 
-    handler = make_handler(cfg, cache, store, updater, admin, proxy, feedback)
+    handler = make_handler(cfg, cache, store, updater, admin, proxy, feedback, analytics)
     httpd = ThreadingHTTPServer((host, port), handler)
     httpd.daemon_threads = True
 
@@ -601,6 +640,7 @@ def serve(cfg: dict) -> None:
     def _shutdown(signum, _frame):
         log.info("收到信号 %s，正在退出…", signum)
         proxy.meter.flush()
+        analytics.flush()
         threading.Thread(target=httpd.shutdown, daemon=True).start()
 
     for sig in (signal.SIGTERM, signal.SIGINT):
@@ -626,4 +666,5 @@ def serve(cfg: dict) -> None:
     finally:
         updater.shutdown()
         proxy.meter.flush()
+        analytics.flush()
         httpd.server_close()

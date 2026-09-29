@@ -335,3 +335,58 @@ button.link:hover { text-decoration: underline; }
   .player-tip-actions { width: 100%; }
   .player-tip-actions button { flex: 1; }
 }
+
+/* ------------------------------------------------ 统计看板 */
+/* 单系列用 sequential 蓝；状态色固定，且始终配文字标签，不靠颜色单独表意 */
+:root {
+  --viz-series: #3987e5;          /* 暗色面上的 series-1 */
+  --viz-track: #232b35;
+  --viz-grid: #232b35;
+  --viz-good: #0ca30c;
+  --viz-warning: #fab219;
+  --viz-critical: #d03b3b;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --viz-series: #2a78d6;        /* 浅色面上的 series-1 */
+    --viz-track: #e6eaee;
+    --viz-grid: #e6eaee;
+  }
+}
+
+.charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; margin-top: 14px; }
+.chart h4 { margin: 0 0 2px; font-size: 13px; font-weight: 600; color: var(--text); }
+.chart .chart-sub { font-size: 11px; color: var(--text-dim); margin-bottom: 6px; }
+.chart svg { display: block; overflow: visible; }
+.chart .chart-body { min-height: 132px; }
+.chart .bar { fill: var(--viz-series); }
+.chart .bar:hover { filter: brightness(1.15); }
+.chart .baseline { stroke: var(--viz-grid); stroke-width: 1; }
+.chart .tick { fill: var(--text-dim); font-size: 9px; }
+.chart .peak { fill: var(--text); font-size: 10px; font-weight: 600; }
+
+.chart-tip {
+  position: fixed; z-index: 60; pointer-events: none; opacity: 0;
+  background: var(--bg-elev); border: 1px solid var(--border); border-radius: 8px;
+  padding: 6px 10px; font-size: 12px; color: var(--text);
+  box-shadow: 0 6px 20px rgba(0,0,0,.35); transition: opacity .12s;
+  white-space: nowrap;
+}
+.chart-tip.show { opacity: 1; }
+
+.meter { margin-top: 12px; }
+.meter-head { display: flex; align-items: baseline; gap: 8px; font-size: 13px; margin-bottom: 6px; }
+.meter-head .meter-label { color: var(--text-dim); }
+.meter-head .meter-value { font-weight: 600; font-variant-numeric: tabular-nums; }
+.meter-head .meter-state { margin-left: auto; font-size: 12px; }
+.meter-track { height: 10px; border-radius: 5px; background: var(--viz-track); overflow: hidden; }
+.meter-track > i { display: block; height: 100%; border-radius: 5px 0 0 5px; }
+.state-good { color: var(--viz-good); }
+.state-warning { color: var(--viz-warning); }
+.state-critical { color: var(--viz-critical); }
+.fill-good { background: var(--viz-good); }
+.fill-warning { background: var(--viz-warning); }
+.fill-critical { background: var(--viz-critical); }
+
+.rank-bar { height: 6px; border-radius: 3px; background: var(--viz-track); overflow: hidden; }
+.rank-bar > i { display: block; height: 100%; background: var(--viz-series); border-radius: 3px 0 0 3px; }

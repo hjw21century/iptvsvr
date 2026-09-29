@@ -262,6 +262,184 @@
     el("detailModal").classList.add("open");
   }
 
+  // ------------------------------------------------------- 流量与访客
+  /* 图表规则：每张图只画一条序列（不同量纲不共轴），单序列不需要图例；
+     柱宽 ≤24px、顶部 4px 圆角、底边贴基线、柱间留 2px 空隙；
+     只给峰值做直接标注，网格线克制；悬停有独立浮层。 */
+  var CHART = { height: 132, pad: 16, bottom: 20, maxBar: 24, gap: 2, radius: 4 };
+  var trafficData = null;
+
+  function chartSvg(rows, key, format, width) {
+    var plot = CHART.height - CHART.bottom;
+    var values = rows.map(function (row) { return row[key] || 0; });
+    var peak = Math.max.apply(null, values.concat([0]));
+    var count = rows.length || 1;
+    var band = (width - CHART.pad * 2) / count;
+    var barWidth = Math.max(3, Math.min(CHART.maxBar, band - CHART.gap));
+    var radius = Math.min(CHART.radius, barWidth / 2);
+
+    var bars = peak > 0 ? rows.map(function (row, index) {
+      var value = row[key] || 0;
+      var height = value > 0 ? Math.max(2, (value / peak) * (plot - 16)) : 0;
+      if (!height) return "";
+      var x = CHART.pad + band * index + (band - barWidth) / 2;
+      var y = plot - height;
+      var r = height > radius ? radius : 0;
+      // 顶部圆角、底边直角贴基线
+      var path = "M" + x.toFixed(1) + "," + plot + "V" + (y + r).toFixed(1) +
+        "Q" + x.toFixed(1) + "," + y.toFixed(1) + " " + (x + r).toFixed(1) + "," + y.toFixed(1) +
+        "H" + (x + barWidth - r).toFixed(1) +
+        "Q" + (x + barWidth).toFixed(1) + "," + y.toFixed(1) + " " +
+          (x + barWidth).toFixed(1) + "," + (y + r).toFixed(1) +
+        "V" + plot + "Z";
+      return '<path class="bar" d="' + path + '" data-label="' + esc(row.day) +
+        '" data-value="' + esc(format(value)) + '"></path>' +
+        (value === peak
+          ? '<text class="peak" x="' + (x + barWidth / 2).toFixed(1) + '" y="' +
+            (y - 5).toFixed(1) + '" text-anchor="middle">' + esc(format(value)) + "</text>"
+          : "");
+    }).join("") : '<text class="tick" x="' + (width / 2) + '" y="' + (plot / 2) +
+        '" text-anchor="middle">暂无数据</text>';
+
+    var ticks = rows.length
+      ? '<text class="tick" x="' + CHART.pad + '" y="' + (plot + 13) + '">' +
+          esc(rows[0].day) + "</text>" +
+        '<text class="tick" x="' + (width - CHART.pad) + '" y="' + (plot + 13) +
+          '" text-anchor="end">' + esc(rows[rows.length - 1].day) + "</text>"
+      : "";
+
+    return '<svg width="' + width + '" height="' + CHART.height + '" role="img">' +
+      '<line class="baseline" x1="' + CHART.pad + '" y1="' + plot + '" x2="' +
+        (width - CHART.pad) + '" y2="' + plot + '"></line>' +
+      bars + ticks +
+      "</svg>";
+  }
+
+  var CHART_SPECS = [
+    ["visitors", "访客数", "每天去重后的独立访客", function (v) { return v + " 人"; }],
+    ["play", "播放次数", "网页里点击播放的次数", function (v) { return v + " 次"; }],
+    ["proxy_gb", "中转流量", "经本站转发的出站流量", function (v) { return v + " GB"; }],
+    ["playlist", "订阅下载", "播放列表与单频道 m3u 的下载次数", function (v) { return v + " 次"; }]
+  ];
+
+  /* 按容器实测宽度用真实像素绘制：viewBox 拉伸会把 4px 圆角压成椭圆 */
+  function drawCharts() {
+    if (!trafficData) return;
+    var rows = trafficData.series || [];
+    el("trafficCharts").querySelectorAll(".chart").forEach(function (box) {
+      var spec = CHART_SPECS[Number(box.dataset.index)];
+      var width = Math.max(220, Math.round(box.clientWidth));
+      box.querySelector(".chart-body").innerHTML =
+        chartSvg(rows, spec[0], spec[3], width);
+    });
+    bindChartTips();
+  }
+
+  function renderCharts() {
+    el("trafficCharts").innerHTML = CHART_SPECS.map(function (spec, index) {
+      return '<div class="chart" data-index="' + index + '">' +
+        "<h4>" + esc(spec[1]) + "</h4>" +
+        '<div class="chart-sub">' + esc(spec[2]) + "</div>" +
+        '<div class="chart-body"></div></div>';
+    }).join("");
+    drawCharts();
+  }
+
+  function bindChartTips() {
+    var tip = el("chartTip");
+    el("trafficCharts").querySelectorAll(".bar").forEach(function (bar) {
+      bar.addEventListener("mousemove", function (event) {
+        tip.textContent = bar.dataset.label + " · " + bar.dataset.value;
+        tip.style.left = (event.clientX + 14) + "px";
+        tip.style.top = (event.clientY - 30) + "px";
+        tip.classList.add("show");
+      });
+      bar.addEventListener("mouseleave", function () { tip.classList.remove("show"); });
+    });
+  }
+
+  function quotaMeter(proxy) {
+    if (!proxy || !proxy.daily_limit_gb) return "";
+    var percent = Math.max(0, Math.min(100, proxy.percent || 0));
+    var state = percent >= 85 ? "critical" : (percent >= 60 ? "warning" : "good");
+    var label = { good: "充足", warning: "接近上限", critical: "即将用尽" }[state];
+    var icon = { good: "✓", warning: "!", critical: "✕" }[state];
+    return '<div class="meter"><div class="meter-head">' +
+        '<span class="meter-label">今日中转配额</span>' +
+        '<span class="meter-value">' + proxy.gb + " / " + proxy.daily_limit_gb + " GB</span>" +
+        '<span class="meter-state state-' + state + '">' + icon + " " + label +
+          "（" + percent + "%）</span>" +
+      "</div>" +
+      '<div class="meter-track"><i class="fill-' + state + '" style="width:' +
+        percent + '%"></i></div>' +
+      '<div class="chart-sub" style="margin-top:6px">正在预览 ' + (proxy.active || 0) +
+        " 路 · 今日中转请求 " + (proxy.requests || 0) +
+        " 次 · 因超限被拒 " + (proxy.blocked || 0) + " 次</div></div>";
+  }
+
+  function renderTraffic(data) {
+    trafficData = data;
+    var today = data.today || {};
+    var totals = data.totals || {};
+    var feedback = data.feedback_stats || {};
+
+    el("trafficTiles").innerHTML = [
+      ["今日访客", today.visitors || 0, (totals.visitors || 0) + " 人次/" + data.days + "天"],
+      ["今日页面打开", today.page || 0, (totals.page || 0) + " 次/" + data.days + "天"],
+      ["今日播放", today.play || 0, (totals.play || 0) + " 次/" + data.days + "天"],
+      ["今日中转流量", (today.proxy_gb || 0) + " GB", (totals.proxy_gb || 0) + " GB/" + data.days + "天"],
+      ["今日订阅下载", today.playlist || 0, (totals.playlist || 0) + " 次/" + data.days + "天"],
+      ["反馈总数", feedback.total || 0, "24 小时内 " + (feedback.last_24h || 0) + " 条"]
+    ].map(function (item) {
+      return '<div class="tile"><div class="label">' + esc(item[0]) + "</div>" +
+        '<div class="value">' + esc(String(item[1])) +
+        '<small>' + esc(item[2]) + "</small></div></div>";
+    }).join("");
+
+    el("quotaMeter").innerHTML = quotaMeter(data.proxy);
+
+    var rows = data.series || [];
+    renderCharts();
+
+    el("trafficRange").textContent = rows.length
+      ? rows[0].day + " ~ " + rows[rows.length - 1].day : "";
+
+    el("visitorsBody").innerHTML = (data.visitors || []).map(function (v) {
+      return "<tr><td><code>" + esc(v.ip) + "</code></td>" +
+        '<td class="hide-sm">' + esc(v.device) + "</td>" +
+        "<td>" + v.requests + "</td><td>" + v.plays + "</td>" +
+        "<td>" + v.mb + " MB</td>" +
+        '<td class="hide-sm">' + timeOf(v.last_seen).slice(-8) + "</td></tr>";
+    }).join("") || '<tr><td colspan="6" class="empty">今天还没有访客记录</td></tr>';
+
+    var channels = data.channels || [];
+    var top = channels.length ? channels[0].plays : 1;
+    el("hotChannelsBody").innerHTML = channels.map(function (c) {
+      return "<tr><td>" + esc(c.channel_name || c.channel_key) + "</td>" +
+        "<td>" + c.plays + "</td>" +
+        '<td><div class="rank-bar"><i style="width:' +
+          Math.round(100 * c.plays / (top || 1)) + '%"></i></div></td></tr>';
+    }).join("") || '<tr><td colspan="3" class="empty">今天还没有播放记录</td></tr>';
+  }
+
+  function renderTrafficTable() {
+    if (!trafficData) return;
+    var rows = trafficData.series || [];
+    el("trafficTableBox").innerHTML =
+      '<table class="compact"><thead><tr><th>日期</th><th>访客</th><th>页面打开</th>' +
+      "<th>播放</th><th>订阅下载</th><th>中转请求</th><th>中转流量</th><th>反馈</th></tr></thead><tbody>" +
+      rows.slice().reverse().map(function (r) {
+        return "<tr><td>" + esc(r.day) + "</td><td>" + r.visitors + "</td><td>" + r.page +
+          "</td><td>" + r.play + "</td><td>" + r.playlist + "</td><td>" + r.proxy +
+          "</td><td>" + r.proxy_mb + " MB</td><td>" + r.feedback + "</td></tr>";
+      }).join("") + "</tbody></table>";
+  }
+
+  function loadTraffic() {
+    api("/analytics?days=" + el("trafficDays").value).then(renderTraffic)
+      .catch(function (err) { toast("加载失败：" + err.message); });
+  }
+
   // ------------------------------------------------------------- 反馈
   function loadFeedback() {
     var params = new URLSearchParams({
@@ -418,6 +596,8 @@
       }
     } else if (S.tab === "streams") {
       if (force || !S.loaded.streams) { S.loaded.streams = true; loadStreams(true); }
+    } else if (S.tab === "traffic") {
+      if (force || !S.loaded.traffic) { S.loaded.traffic = true; loadTraffic(); }
     } else if (S.tab === "feedback") {
       if (force || !S.loaded.feedback) { S.loaded.feedback = true; loadFeedback(); }
     } else if (S.tab === "settings") {
@@ -554,6 +734,21 @@
           .then(function () { toast("已删除"); loadStreams(false); });
       }
     });
+
+    el("trafficReload").onclick = loadTraffic;
+    var resizeTimer = null;
+    window.addEventListener("resize", function () {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(drawCharts, 150);
+    });
+    el("trafficDays").addEventListener("change", loadTraffic);
+    el("trafficTable").onclick = function () {
+      var box = el("trafficTableBox");
+      var hidden = box.classList.contains("hidden");
+      if (hidden) renderTrafficTable();
+      box.classList.toggle("hidden");
+      this.textContent = hidden ? "收起数据表" : "查看数据表";
+    };
 
     el("fbReload").onclick = loadFeedback;
     el("fbKind").addEventListener("change", loadFeedback);
