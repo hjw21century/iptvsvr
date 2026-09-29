@@ -673,7 +673,7 @@ class TestWebAssets(unittest.TestCase):
 
     WEB = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web")
     PAIRS = [("admin.js", "admin.html"), ("app.js", "index.html")]
-    DYNAMIC_IDS = {"moreBtn", "welcomeEnter"}  # 由 JS 运行时插入，不在静态 HTML 里
+    DYNAMIC_IDS = {"moreBtn", "welcomeEnter", "guideCopy", "guideUrl"}  # 由 JS 运行时插入
 
     def test_js_syntax(self):
         try:

@@ -10,6 +10,20 @@
 <div class="wrap">
   <div id="noticeBar"></div>
 
+  <div class="player-tip" id="playerTip">
+    <span class="player-tip-icon">▶</span>
+    <div class="player-tip-text">
+      <b>网页播放仅供试看</b>（10 分钟自动暂停，部分源受中转配额限制）。
+      获得完整体验请用 <b>VLC</b>、PotPlayer、Kodi 等直播专用播放器订阅观看——
+      直连源站，更稳、更清晰、可切台、支持后台播放。
+    </div>
+    <div class="player-tip-actions">
+      <button class="primary" id="tipCopy">复制订阅地址</button>
+      <button id="tipDownload">下载 m3u</button>
+      <button id="tipGuide">怎么用？</button>
+    </div>
+  </div>
+
   <header class="top">
     <h1>📡 IPTV-Hub</h1>
     <span class="sub">深度探测 · 稳定性评分 · 按需订阅</span>
@@ -95,6 +109,16 @@
       <video id="player" controls playsinline></video>
       <div class="stream-list" id="streamList"></div>
     </div>
+  </div>
+</div>
+
+<div class="modal" id="guideModal">
+  <div class="box">
+    <header>
+      <h3>用专用播放器观看（推荐）</h3>
+      <button id="guideClose">关闭</button>
+    </header>
+    <div class="body" id="guideBody"></div>
   </div>
 </div>
 

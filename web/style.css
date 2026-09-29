@@ -300,3 +300,38 @@ button.link:hover { text-decoration: underline; }
 .box.welcome.festive button.primary {
   background: #ffd98a; border-color: #ffd98a; color: #7a0c10; font-weight: 600;
 }
+
+/* ------------------------------------------------ 专用播放器引导 */
+.player-tip {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  padding: 12px 16px; margin-bottom: 16px; border-radius: var(--radius);
+  background: var(--accent-soft); border: 1px solid rgba(79, 156, 249, .35);
+}
+.player-tip-icon {
+  width: 30px; height: 30px; flex: none; border-radius: 50%;
+  background: var(--accent); color: #fff; display: flex;
+  align-items: center; justify-content: center; font-size: 13px;
+}
+.player-tip-text { flex: 1; min-width: 220px; font-size: 13px; line-height: 1.8; color: var(--text); }
+.player-tip-text b { color: var(--accent); }
+.player-tip-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.player-tip.hidden { display: none; }
+
+.guide h4 { margin: 18px 0 6px; font-size: 14px; }
+.guide h4:first-child { margin-top: 0; }
+.guide p, .guide li { font-size: 13px; line-height: 1.9; color: var(--text-dim); }
+.guide ol, .guide ul { margin: 0; padding-left: 20px; }
+.guide code {
+  background: var(--bg-elev-2); border: 1px solid var(--border); border-radius: 5px;
+  padding: 1px 6px; color: var(--text); word-break: break-all;
+}
+.guide .sub-url { margin-top: 10px; }
+.guide .why {
+  background: var(--bg-elev-2); border-radius: 8px; padding: 10px 14px; margin-bottom: 4px;
+}
+
+@media (max-width: 720px) {
+  .player-tip { gap: 10px; }
+  .player-tip-actions { width: 100%; }
+  .player-tip-actions button { flex: 1; }
+}

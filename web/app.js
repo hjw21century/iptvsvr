@@ -224,10 +224,12 @@
   }
 
   function renderStreams(channel) {
-    var head = '<div class="stream-tip">网页播放仅供试看（10 分钟自动暂停）。' +
-      '标「直连」的源由浏览器直接拉取，不占本站流量；标「中转」的源受每日配额限制。' +
-      '长期观看请 <a href="/channel.m3u?key=' + encodeURIComponent(channel.key) +
-      '" download>下载本频道 m3u</a>，用 VLC 等播放器打开。</div>';
+    var head = '<div class="stream-tip"><b>网页播放仅供试看</b>，10 分钟自动暂停；' +
+      '标「直连」的源由浏览器直接拉取，标「中转」的源受每日配额限制。<br>' +
+      '想稳定观看，请用 <b>VLC</b> 等直播专用播放器：' +
+      '<a href="/channel.m3u?key=' + encodeURIComponent(channel.key) +
+      '" download>下载本频道 m3u</a> · ' +
+      '<a href="#" data-guide="1">查看使用方法</a></div>';
 
     el("streamList").innerHTML = head + (channel.streams || []).map(function (stream, index) {
       var label = index === 0 ? "主源" : "备用" + index;
@@ -320,6 +322,7 @@
     feedbackState.items = [];
     renderStreams(channel);
     loadFeedback(channel);
+    remindOnce();
 
     var stream = streamOf(channel, url || channel.url);
     var viaProxy = !stream.direct || forceProxy;
@@ -361,7 +364,7 @@
     clearTimeout(sessionTimer);
     sessionTimer = setTimeout(function () {
       video.pause();
-      toast("网页预览已暂停（" + PREVIEW_MINUTES + " 分钟上限）。长时间观看请复制地址用 VLC");
+      toast("网页试看已暂停（" + PREVIEW_MINUTES + " 分钟上限）。继续观看请用 VLC 订阅，点「怎么用？」看步骤");
     }, PREVIEW_MINUTES * 60000);
   }
 
@@ -373,6 +376,76 @@
     video.removeAttribute("src");
     video.load();
     if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
+  }
+
+  // ------------------------------------------------------ 专用播放器引导
+  /* 浏览器放直播先天吃亏：混合内容与跨域限制、切台慢、后台标签页会被节流，
+     还要占本站中转配额。所以主动把用户引到 VLC 这类专用播放器上。 */
+  function guideHtml() {
+    var sub = subscriptionUrl();
+    return '<div class="guide">' +
+      '<div class="why"><b>为什么推荐专用播放器？</b><ul>' +
+        "<li>浏览器对直播流限制多：http 源受混合内容拦截，跨域也常被挡，只能经本站中转</li>" +
+        "<li>专用播放器直连源站，起播快、切台快，硬件解码更省电，画面也更稳</li>" +
+        "<li>支持后台播放、投屏、记忆频道；网页试看 10 分钟会自动暂停</li>" +
+        "<li>不占用本站中转流量，大家都更顺畅</li>" +
+      "</ul></div>" +
+
+      "<h4>订阅地址（随当前筛选变化）</h4>" +
+      '<div class="sub-url"><code id="guideUrl">' + escapeHtml(sub) + "</code>" +
+        '<button class="primary" id="guideCopy">复制</button></div>' +
+
+      "<h4>Windows / macOS —— VLC</h4><ol>" +
+        "<li>菜单「媒体 → 打开网络串流」（macOS 是「文件 → 打开网络」）</li>" +
+        "<li>粘贴上面的订阅地址，点播放</li>" +
+        "<li>或者直接双击下载好的 <code>.m3u</code> 文件，VLC 会列出全部频道</li>" +
+      "</ol>" +
+
+      "<h4>iPhone / iPad</h4><ol>" +
+        "<li>App Store 安装 <b>VLC for Mobile</b>（或 nPlayer、APTV）</li>" +
+        "<li>VLC 里「网络 → 打开网络串流」，粘贴订阅地址</li>" +
+        "<li>也可以在本页点「下载 m3u」，然后选择用 VLC 打开</li>" +
+      "</ol>" +
+
+      "<h4>Android / 电视盒子</h4><ol>" +
+        "<li>安装 <b>VLC for Android</b>、Kodi、TiviMate 或「我的IPTV」</li>" +
+        "<li>选择「添加网络播放列表 / 远程 m3u」，填入订阅地址</li>" +
+        "<li>电视端建议用遥控器友好的 TiviMate、Kodi</li>" +
+      "</ol>" +
+
+      "<h4>小提示</h4><ul>" +
+        "<li>订阅地址支持筛选参数，例如只要央视 1080p：" +
+          "<code>/playlist.m3u?group=央视频道&min_height=1080</code></li>" +
+        "<li>播放列表每 4 小时自动更新，播放器里重新加载一次即可拿到最新源</li>" +
+        "<li>某条源卡顿或打不开，欢迎在频道的「反馈这条源」里点一下告诉我们</li>" +
+      "</ul></div>";
+  }
+
+  function openGuide() {
+    el("guideBody").innerHTML = guideHtml();
+    el("guideModal").classList.add("open");
+    el("guideCopy").onclick = function () { copy(subscriptionUrl()); };
+  }
+
+  function bindPlayerTip() {
+    el("tipCopy").onclick = function () { copy(subscriptionUrl()); };
+    el("tipDownload").onclick = function () {
+      location.href = state.static ? "playlist.m3u" : "/playlist.m3u" + params();
+    };
+    el("tipGuide").onclick = openGuide;
+    el("guideClose").onclick = function () { el("guideModal").classList.remove("open"); };
+    el("guideModal").addEventListener("click", function (event) {
+      if (event.target === el("guideModal")) el("guideModal").classList.remove("open");
+    });
+  }
+
+  /* 第一次点播放时提醒一次，之后不再打扰 */
+  function remindOnce() {
+    if (localStorage.getItem("iptvhub_player_hint")) return;
+    localStorage.setItem("iptvhub_player_hint", "1");
+    setTimeout(function () {
+      toast("网页播放仅供试看，长期观看建议用 VLC 订阅，点上方「怎么用？」查看");
+    }, 1200);
   }
 
   // ---------------------------------------------------------------- 公告
@@ -515,6 +588,12 @@
     });
 
     el("streamList").addEventListener("click", function (event) {
+      var guideLink = event.target.closest("[data-guide]");
+      if (guideLink) {
+        event.preventDefault();
+        openGuide();
+        return;
+      }
       var button = event.target.closest("button");
       if (!button) return;
 
@@ -582,6 +661,7 @@
   }
 
   bind();
+  bindPlayerTip();
   loadNotice();
   loadStats();
   loadChannels();
