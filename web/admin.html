@@ -37,6 +37,7 @@
       <div class="tile"><div class="label">数据版本</div><div class="value sm" id="tVersion">—</div></div>
       <div class="tile"><div class="label">自动更新</div><div class="value sm" id="tAuto">—</div></div>
       <div class="tile"><div class="label">今日中转流量</div><div class="value sm" id="tProxy">—</div></div>
+      <div class="tile"><div class="label">游客权限</div><div class="value sm" id="tAccess">—</div></div>
     </div>
 
     <div class="panel">
@@ -209,6 +210,11 @@
 
   <!-- ------------------------------------------------ 参数 -->
   <section class="tabpage hidden" id="page-settings">
+    <div class="panel">
+      <h3>访问权限（改动立即生效，无需重启）</h3>
+      <div id="accessSwitches"></div>
+    </div>
+
     <div class="panel">
       <div class="controls">
         <button class="primary" id="saveConfig">保存参数</button>

@@ -102,6 +102,12 @@
         '<div class="hint">正在预览 ' + proxy.active + " 路 · 请求 " + proxy.requests +
         " · 被限 " + proxy.blocked + "</div>"
       : "未启用";
+    var access = data.access || {};
+    el("tAccess").innerHTML = !access.proxy_enabled
+      ? '网页中转已关闭<div class="hint">游客与用户都只能播直连源</div>'
+      : (access.guest_can_play_all
+          ? '可播全部频道<div class="hint">游客也走本站中转，注意流量</div>'
+          : '仅直连频道<div class="hint">中转播放需要登录</div>');
     el("serverTime").textContent = "服务器时间 " + (data.server_time || "");
 
     el("runsBody").innerHTML = (data.runs || []).map(function (run) {
@@ -550,9 +556,54 @@
                                  "proxy_max_request_mb", "proxy_max_request_seconds"]]
   ];
 
+  var ACCESS_SWITCHES = [
+    ["proxy_require_login", "开放游客播放全部频道",
+     "关闭此项 = 游客也能播放需要本站中转的频道。中转会消耗服务器流量" +
+     "（一人一小时约 1.5GB 出站），开放前先看「流量与访客」里的配额。",
+     true],   // true 表示界面上的开关语义与配置项相反
+    ["require_login", "前台必须登录才能浏览",
+     "开启后，未登录访问首页会跳转到登录页；播放器可用账号的订阅密钥订阅。", false],
+    ["proxy_enabled", "启用网页中转播放",
+     "整体关掉后，网页里只能播直连源，其余频道请复制地址用 VLC 观看，本站流量基本归零。",
+     false]
+  ];
+
+  function renderAccessSwitches() {
+    var config = S.config || {};
+    el("accessSwitches").innerHTML = ACCESS_SWITCHES.map(function (item) {
+      var key = item[0], inverted = item[3];
+      var raw = config[key] !== undefined ? !!config[key] : (key !== "require_login");
+      var checked = inverted ? !raw : raw;
+      return '<label class="switch-row">' +
+        '<input type="checkbox" data-switch="' + key + '" data-inverted="' +
+          (inverted ? "1" : "") + '"' + (checked ? " checked" : "") + ">" +
+        "<span><b>" + esc(item[1]) + "</b>" +
+        '<span class="hint">' + esc(item[2]) + "</span></span></label>";
+    }).join("");
+
+    el("accessSwitches").querySelectorAll("[data-switch]").forEach(function (input) {
+      input.addEventListener("change", function () {
+        var key = input.dataset.switch;
+        var value = input.dataset.inverted ? !input.checked : input.checked;
+        var patch = {};
+        patch[key] = value;
+        api("/config", { method: "POST", body: { config: patch } }).then(function () {
+          S.config[key] = value;
+          toast("已保存，立即生效");
+          refreshCurrentTab(true);
+          api("/summary").then(renderSummary);
+        }).catch(function (err) {
+          toast("保存失败：" + err.message);
+          input.checked = !input.checked;
+        });
+      });
+    });
+  }
+
   function renderSettings(data) {
     S.config = data.config || {};
     S.editable = data.editable || {};
+    renderAccessSwitches();
     var html = GROUPS.map(function (group) {
       var fields = group[1].filter(function (key) {
         return S.editable.numbers && key in S.editable.numbers;

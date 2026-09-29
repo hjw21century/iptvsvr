@@ -423,3 +423,14 @@ button.muted { color: var(--text-dim); border-style: dashed; }
 button.muted:hover { color: var(--accent); border-color: var(--accent); }
 a.user-chip { text-decoration: none; }
 a.user-chip:hover { border-color: var(--accent); color: var(--accent); }
+
+/* 访问权限开关 */
+.switch-row {
+  display: flex; gap: 12px; align-items: flex-start; padding: 12px 0;
+  border-top: 1px solid var(--border); cursor: pointer;
+}
+.switch-row:first-child { border-top: none; padding-top: 4px; }
+.switch-row input { width: 18px; height: 18px; margin-top: 2px; flex: none; accent-color: var(--accent); }
+.switch-row span { display: block; font-size: 13px; }
+.switch-row b { display: block; margin-bottom: 3px; }
+.switch-row .hint { color: var(--text-dim); font-size: 12px; line-height: 1.7; }

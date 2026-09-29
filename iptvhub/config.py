@@ -178,6 +178,36 @@ def save_config_file(payload: Dict[str, Any], path: str = None) -> str:
     return target
 
 
+class LiveConfig:
+    """按文件修改时间重读 config.json。
+
+    访问权限这类开关在后台改完应当立刻生效，不该要求重启服务，
+    所以请求路径上用它取值，而不是用启动时快照的那份配置。
+    """
+
+    def __init__(self, path: str = None):
+        self.path = config_file_path(path)
+        self._mtime = 0.0
+        self._data: Dict[str, Any] = {}
+
+    def data(self) -> Dict[str, Any]:
+        try:
+            mtime = os.path.getmtime(self.path)
+        except OSError:
+            return self._data
+        if mtime != self._mtime:
+            self._data = _load_json(self.path)
+            self._mtime = mtime
+        return self._data
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return self.data().get(key, default)
+
+    def flag(self, key: str, default: bool = False) -> bool:
+        value = self.get(key, default)
+        return bool(value)
+
+
 def load_sources_raw(path: str = None) -> list:
     """读取 sources.json 中的全部源（含被停用的），供后台展示与编辑。"""
     payload = _load_json(sources_file_path(path))

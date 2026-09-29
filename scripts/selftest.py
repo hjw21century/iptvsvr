@@ -172,6 +172,43 @@ class TestAdminApi(unittest.TestCase):
         self.assertFalse(self.api.authorized("wrong"))
         self.assertFalse(self.api.authorized(self.api.token() + "x"))
 
+    def test_access_flags_are_editable(self):
+        """访问权限开关必须能从后台改，且只认布尔白名单里的键。"""
+        import shutil
+        from iptvhub.admin import EDITABLE_BOOLS
+        from iptvhub.config import config_file_path
+        self.assertIn("proxy_require_login", EDITABLE_BOOLS)
+        self.assertIn("require_login", EDITABLE_BOOLS)
+
+        original = config_file_path()
+        backup = os.path.join(self.tmpdir, "config.bak")
+        shutil.copy(original, backup)
+        try:
+            status, result = self.api.handle(
+                "POST", "/config", {},
+                {"config": {"proxy_require_login": False, "paths": {"db": "/tmp/x"}}})
+            self.assertEqual(status, 200)
+            self.assertIs(result["applied"]["proxy_require_login"], False)
+            self.assertIn("paths", result["rejected"])
+        finally:
+            shutil.copy(backup, original)
+
+    def test_live_config_reloads_on_change(self):
+        """开关改完要立刻生效，不能等重启。"""
+        import json as _json
+        from iptvhub.config import LiveConfig
+        path = os.path.join(self.tmpdir, "live.json")
+        with open(path, "w", encoding="utf-8") as handle:
+            _json.dump({"proxy_require_login": True}, handle)
+        live = LiveConfig(path)
+        self.assertTrue(live.flag("proxy_require_login", True))
+
+        time.sleep(0.01)
+        with open(path, "w", encoding="utf-8") as handle:
+            _json.dump({"proxy_require_login": False}, handle)
+        os.utime(path, (time.time() + 1, time.time() + 1))   # 确保 mtime 变化
+        self.assertFalse(live.flag("proxy_require_login", True))
+
     def test_unknown_route(self):
         status, _ = self.api.handle("GET", "/nope", {}, {})
         self.assertEqual(status, 404)

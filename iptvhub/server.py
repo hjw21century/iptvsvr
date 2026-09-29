@@ -19,7 +19,7 @@ from . import export
 from .admin import AdminApi
 from .analytics import Analytics
 from .auth import COOKIE_NAME, Auth
-from .config import load_config
+from .config import LiveConfig, load_config
 from .feedback import FeedbackService
 from .netclient import HttpClient
 from .notices import load_active
@@ -143,6 +143,7 @@ def make_handler(cfg: dict, cache: ChannelCache, store: Store, updater: Updater,
     web_dir = cfg["paths"]["web"]
     data_dir = cfg["paths"]["data"]
     admin_token = (cfg["server"].get("admin_token") or "").strip()
+    live = LiveConfig()
     epg_url = cfg.get("epg_url", "")
     site_url = cfg.get("site_url", "")
 
@@ -426,7 +427,7 @@ def make_handler(cfg: dict, cache: ChannelCache, store: Store, updater: Updater,
                     self._json({"error": "需要管理员身份", "login": True}, 401)
                 return False
 
-            if path == "/proxy" and cfg.get("proxy_require_login", True):
+            if path == "/proxy" and live.flag("proxy_require_login", True):
                 if self._user():
                     return True
                 self._json({
@@ -436,7 +437,7 @@ def make_handler(cfg: dict, cache: ChannelCache, store: Store, updater: Updater,
                 }, 401)
                 return False
 
-            if not auth.require_login or self._user():
+            if not live.flag("require_login", False) or self._user():
                 return True
 
             if path == "/":
@@ -703,8 +704,11 @@ def make_handler(cfg: dict, cache: ChannelCache, store: Store, updater: Updater,
                 return
 
             if path == "/api/me":
-                self._json({"user": auth.public(self._user()),
-                            "require_login": auth.require_login})
+                self._json({
+                    "user": auth.public(self._user()),
+                    "require_login": live.flag("require_login", False),
+                    "guest_can_play_all": not live.flag("proxy_require_login", True),
+                })
                 return
 
             if path == "/api/notice":

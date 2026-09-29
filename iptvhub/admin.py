@@ -40,6 +40,8 @@ EDITABLE_NUMBERS = {
     "proxy_max_request_mb": (1, 4096), "proxy_max_request_seconds": (10, 3600),
 }
 EDITABLE_STRINGS = ("epg_url", "site_url", "user_agent")
+# 访问权限开关：后台改完立即生效（服务端按 mtime 重读 config.json）
+EDITABLE_BOOLS = ("require_login", "proxy_require_login", "proxy_enabled")
 EDITABLE_WEIGHTS = ("stability", "speed", "quality", "latency", "https_bonus",
                     "ipv4_bonus", "direct_bonus")
 EDITABLE_SERVER = {"auto_update": bool, "update_interval_hours": int, "admin_token": str}
@@ -144,6 +146,13 @@ class AdminApi:
             "proxy": self.proxy.meter.snapshot() if self.proxy else None,
             "notice": load_active(self.cfg["paths"]["config"]),
             "users": len(self.auth.list_users()) if self.auth else 0,
+            "access": {
+                "require_login": bool(config_module.load_config_file().get("require_login", False)),
+                "guest_can_play_all": not bool(
+                    config_module.load_config_file().get("proxy_require_login", True)),
+                "proxy_enabled": bool(
+                    config_module.load_config_file().get("proxy_enabled", True)),
+            },
         }
 
     def _progress(self, query, body):
@@ -170,6 +179,7 @@ class AdminApi:
             "editable": {
                 "numbers": {k: list(v) for k, v in EDITABLE_NUMBERS.items()},
                 "strings": list(EDITABLE_STRINGS),
+                "bools": list(EDITABLE_BOOLS),
                 "weights": list(EDITABLE_WEIGHTS),
                 "server": list(EDITABLE_SERVER),
             },
@@ -428,6 +438,9 @@ class AdminApi:
                 raw[key] = int(number) if float(number).is_integer() and key not in (
                     "probe_seconds", "ewma_alpha", "min_score") else number
                 applied[key] = raw[key]
+            elif key in EDITABLE_BOOLS:
+                raw[key] = bool(value)
+                applied[key] = raw[key]
             elif key in EDITABLE_STRINGS:
                 raw[key] = str(value)[:400]
                 applied[key] = raw[key]
@@ -465,7 +478,7 @@ class AdminApi:
             config_module.save_config_file(raw)
         return 200, {
             "applied": applied, "rejected": rejected,
-            "note": "下一轮更新自动生效；server.* 需要重启服务",
+            "note": "访问权限开关立即生效；数值类下一轮更新生效；server.* 需要重启服务",
         }
 
     def _probe(self, query, body):
