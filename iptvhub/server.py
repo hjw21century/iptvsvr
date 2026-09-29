@@ -17,6 +17,9 @@ from typing import Any, Dict, List, Optional
 from . import export
 from .admin import AdminApi
 from .config import load_config
+from .feedback import FeedbackService
+from .netclient import HttpClient
+from .proxy import StreamProxy
 from .runtime import RUN_STATE, attach_log_ring
 from .store import Store
 from .util import human_time
@@ -131,7 +134,7 @@ class Updater:
 
 
 def make_handler(cfg: dict, cache: ChannelCache, store: Store, updater: Updater,
-                 admin: AdminApi):
+                 admin: AdminApi, proxy: StreamProxy, feedback: FeedbackService):
     web_dir = cfg["paths"]["web"]
     data_dir = cfg["paths"]["data"]
     admin_token = (cfg["server"].get("admin_token") or "").strip()
@@ -206,6 +209,115 @@ def make_handler(cfg: dict, cache: ChannelCache, store: Store, updater: Updater,
 
         do_HEAD = do_GET
 
+        def do_OPTIONS(self) -> None:  # noqa: N802
+            self.send_response(204)
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Range, Content-Type, X-Admin-Token")
+            self.send_header("Access-Control-Max-Age", "86400")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        # ------------------------------------------------------------ 中转
+        def _proxy(self, query: Dict[str, List[str]]) -> None:
+            if not proxy.enabled:
+                self._json({"error": "proxy disabled"}, 404)
+                return
+
+            url = query.get("u", [""])[0]
+            signature = query.get("s", [""])[0]
+            if not url.lower().startswith(("http://", "https://")):
+                self._json({"error": "bad url"}, 400)
+                return
+            if not proxy.authorized(url, signature):
+                self._json({"error": "forbidden"}, 403)
+                return
+            if not proxy.acquire():
+                self._json({"error": "proxy busy"}, 503)
+                return
+
+            response = None
+            try:
+                headers = {}
+                client_range = self.headers.get("Range")
+                if client_range:
+                    headers["Range"] = client_range
+                response, final_url, head = proxy.open_upstream(url, headers=headers)
+                ctype = response.headers.get("Content-Type", "")
+
+                if proxy.looks_like_manifest(head, ctype):
+                    deadline = time.time() + float(cfg.get("fetch_timeout", 15))
+                    body = head + proxy.client.read_limited(
+                        response, proxy.manifest_max_bytes, deadline)
+                    text = body.decode("utf-8", errors="ignore")
+                    rewritten = proxy.rewrite_manifest(text, final_url)
+                    self._send(rewritten.encode("utf-8"), 200,
+                               "application/vnd.apple.mpegurl; charset=utf-8",
+                               cache_control="no-cache")
+                    return
+
+                status = response.getcode() or 200
+                self.send_response(status)
+                self.send_header("Content-Type", ctype or "video/mp2t")
+                length = response.headers.get("Content-Length")
+                chunked = not length
+                if length:
+                    self.send_header("Content-Length", length)
+                else:
+                    self.send_header("Transfer-Encoding", "chunked")
+                for name in ("Content-Range", "Accept-Ranges"):
+                    value = response.headers.get(name)
+                    if value:
+                        self.send_header(name, value)
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Cache-Control", "public, max-age=10")
+                self.end_headers()
+                self._pump(response, head, chunked)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            except Exception as exc:  # noqa: BLE001
+                log.debug("中转失败 %s: %s", url, exc)
+                try:
+                    self._json({"error": "upstream error", "detail": str(exc)}, 502)
+                except Exception:  # noqa: BLE001
+                    pass
+            finally:
+                if response is not None:
+                    try:
+                        response.close()
+                    except Exception:  # noqa: BLE001
+                        pass
+                proxy.release()
+
+        def _pump(self, response, head: bytes, chunked: bool) -> None:
+            """把上游码流边读边写给浏览器；客户端断开即结束。"""
+            def write(piece: bytes) -> None:
+                if chunked:
+                    self.wfile.write(b"%X\r\n" % len(piece))
+                    self.wfile.write(piece)
+                    self.wfile.write(b"\r\n")
+                else:
+                    self.wfile.write(piece)
+
+            try:
+                if head:
+                    write(head)
+                while True:
+                    piece = response.read(proxy.chunk_size)
+                    if not piece:
+                        break
+                    write(piece)
+                if chunked:
+                    self.wfile.write(b"0\r\n\r\n")
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+
+        def _client_ip(self) -> str:
+            forwarded = self.headers.get("X-Forwarded-For", "")
+            if forwarded:
+                return forwarded.split(",")[0].strip()
+            return self.client_address[0] if self.client_address else ""
+
         def _read_body(self) -> Dict[str, Any]:
             try:
                 length = int(self.headers.get("Content-Length") or 0)
@@ -227,6 +339,12 @@ def make_handler(cfg: dict, cache: ChannelCache, store: Store, updater: Updater,
             try:
                 if path.startswith("/api/admin"):
                     self._admin(path, query, "POST")
+                    return
+                if path == "/api/feedback":
+                    status, result = feedback.submit(
+                        self._read_body(), self._client_ip(),
+                        self.headers.get("User-Agent", ""))
+                    self._json(result, status)
                     return
                 if path == "/api/update":
                     # 旧接口保留：nginx 只放行本机；另可用 admin_token
@@ -279,6 +397,10 @@ def make_handler(cfg: dict, cache: ChannelCache, store: Store, updater: Updater,
                     self._json({"error": "forbidden"}, 403)
                     return
                 self._file(safe)
+                return
+
+            if path == "/proxy":
+                self._proxy(query)
                 return
 
             if path.startswith("/playlist"):
@@ -382,6 +504,13 @@ def make_handler(cfg: dict, cache: ChannelCache, store: Store, updater: Updater,
                             "channels": channels})
                 return
 
+            if path == "/api/feedback":
+                self._json(feedback.listing(
+                    url=query.get("url", [""])[0],
+                    channel_key=query.get("channel", [""])[0],
+                    limit=int(float(query.get("limit", ["30"])[0] or 30))))
+                return
+
             if path == "/api/runs":
                 self._json({"runs": store.recent_runs(20)})
                 return
@@ -412,9 +541,12 @@ def serve(cfg: dict) -> None:
     store = Store(cfg["paths"]["db"])
     updater = Updater(cfg)
     admin = AdminApi(cfg, store, updater, cache)
+    proxy = StreamProxy(cfg, store, HttpClient(cfg))
+    feedback = FeedbackService(store, proxy.secret)
+    admin.feedback = feedback
     attach_log_ring()
 
-    handler = make_handler(cfg, cache, store, updater, admin)
+    handler = make_handler(cfg, cache, store, updater, admin, proxy, feedback)
     httpd = ThreadingHTTPServer((host, port), handler)
     httpd.daemon_threads = True
 

@@ -74,6 +74,22 @@ CREATE TABLE IF NOT EXISTS runs (
     note          TEXT DEFAULT ''
 );
 
+CREATE TABLE IF NOT EXISTS feedback (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    url          TEXT NOT NULL,
+    channel_key  TEXT DEFAULT '',
+    channel_name TEXT DEFAULT '',
+    kind         TEXT DEFAULT 'other',
+    message      TEXT DEFAULT '',
+    nickname     TEXT DEFAULT '',
+    client       TEXT DEFAULT '',
+    created_at   INTEGER NOT NULL,
+    hidden       INTEGER DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_feedback_url     ON feedback(url, id DESC);
+CREATE INDEX IF NOT EXISTS idx_feedback_channel ON feedback(channel_key, id DESC);
+CREATE INDEX IF NOT EXISTS idx_feedback_time    ON feedback(created_at DESC);
+
 CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
     value TEXT
@@ -254,6 +270,94 @@ class Store:
     def recent_runs(self, limit: int = 20) -> List[Dict[str, Any]]:
         return [dict(row) for row in self._connect().execute(
             "SELECT * FROM runs ORDER BY id DESC LIMIT ?", (limit,))]
+
+    # ------------------------------------------------------------------ 反馈
+    def add_feedback(self, url: str, kind: str, message: str = "", nickname: str = "",
+                     channel_key: str = "", channel_name: str = "", client: str = "") -> int:
+        with self._write_lock:
+            conn = self._connect()
+            with conn:
+                cur = conn.execute(
+                    """INSERT INTO feedback (url, channel_key, channel_name, kind, message,
+                                             nickname, client, created_at)
+                       VALUES (?,?,?,?,?,?,?,?)""",
+                    (url, channel_key, channel_name, kind, message, nickname, client,
+                     int(time.time())))
+                return cur.lastrowid
+
+    def list_feedback(self, url: str = "", channel_key: str = "", kind: str = "",
+                      include_hidden: bool = False, limit: int = 50,
+                      offset: int = 0) -> Dict[str, Any]:
+        where, params = [], []
+        if url:
+            where.append("url = ?")
+            params.append(url)
+        if channel_key:
+            where.append("channel_key = ?")
+            params.append(channel_key)
+        if kind:
+            where.append("kind = ?")
+            params.append(kind)
+        if not include_hidden:
+            where.append("hidden = 0")
+        clause = ("WHERE " + " AND ".join(where)) if where else ""
+
+        conn = self._connect()
+        total = conn.execute("SELECT COUNT(*) FROM feedback %s" % clause, params).fetchone()[0]
+        rows = conn.execute(
+            "SELECT * FROM feedback %s ORDER BY id DESC LIMIT ? OFFSET ?" % clause,
+            params + [int(limit), int(offset)]).fetchall()
+        return {"total": total, "items": [dict(r) for r in rows]}
+
+    def feedback_summary(self, channel_key: str = "") -> Dict[str, Dict[str, int]]:
+        """按 URL 汇总各类反馈数量，用于在播放列表里显示角标。"""
+        sql = ("SELECT url, kind, COUNT(*) AS count FROM feedback "
+               "WHERE hidden = 0 %s GROUP BY url, kind")
+        params: List[Any] = []
+        if channel_key:
+            sql = sql % "AND channel_key = ?"
+            params.append(channel_key)
+        else:
+            sql = sql % ""
+        summary: Dict[str, Dict[str, int]] = {}
+        for row in self._connect().execute(sql, params):
+            summary.setdefault(row["url"], {})[row["kind"]] = row["count"]
+        return summary
+
+    def recent_feedback_client(self, client: str, since: int) -> int:
+        row = self._connect().execute(
+            "SELECT COUNT(*) FROM feedback WHERE client = ? AND created_at > ?",
+            (client, since)).fetchone()
+        return row[0] if row else 0
+
+    def duplicate_feedback(self, client: str, url: str, message: str, since: int) -> bool:
+        row = self._connect().execute(
+            """SELECT 1 FROM feedback
+               WHERE client = ? AND url = ? AND message = ? AND created_at > ? LIMIT 1""",
+            (client, url, message, since)).fetchone()
+        return bool(row)
+
+    def set_feedback_hidden(self, feedback_id: int, hidden: bool) -> int:
+        with self._write_lock:
+            conn = self._connect()
+            with conn:
+                return conn.execute("UPDATE feedback SET hidden=? WHERE id=?",
+                                    (1 if hidden else 0, int(feedback_id))).rowcount
+
+    def delete_feedback(self, feedback_id: int) -> int:
+        with self._write_lock:
+            conn = self._connect()
+            with conn:
+                return conn.execute("DELETE FROM feedback WHERE id=?",
+                                    (int(feedback_id),)).rowcount
+
+    def feedback_stats(self) -> Dict[str, int]:
+        conn = self._connect()
+        total = conn.execute("SELECT COUNT(*) FROM feedback").fetchone()[0]
+        hidden = conn.execute("SELECT COUNT(*) FROM feedback WHERE hidden=1").fetchone()[0]
+        day = conn.execute("SELECT COUNT(*) FROM feedback WHERE created_at > ?",
+                           (int(time.time()) - 86400,)).fetchone()[0]
+        return {"total": total, "hidden": hidden, "last_24h": day}
 
     # -------------------------------------------------------------- 后台查询
     def query_streams(self, q: str = "", group: str = "", alive: Optional[int] = None,

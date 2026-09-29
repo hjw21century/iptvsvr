@@ -337,6 +337,129 @@ class TestExport(unittest.TestCase):
         self.assertEqual(ipv6[0]["url"], "http://b/1")
 
 
+class TestProxy(unittest.TestCase):
+    """中转代理：签名、manifest 改写、防开放代理。"""
+
+    def setUp(self):
+        import tempfile as _tempfile
+        from iptvhub.config import load_config
+        from iptvhub.proxy import StreamProxy
+        self.tmpdir = _tempfile.mkdtemp()
+        cfg = load_config()
+        cfg = dict(cfg, paths=dict(cfg["paths"], data=self.tmpdir))
+
+        class FakeStore:
+            known = {"http://known/live.m3u8"}
+
+            def stream(self, url):
+                return {"url": url} if url in self.known else None
+
+        self.proxy = StreamProxy(cfg, FakeStore())
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_signature_roundtrip(self):
+        url = "http://h/seg1.ts"
+        self.assertTrue(self.proxy.verify(url, self.proxy.sign(url)))
+        self.assertFalse(self.proxy.verify(url, "deadbeef"))
+        self.assertFalse(self.proxy.verify(url + "x", self.proxy.sign(url)))
+
+    def test_not_an_open_proxy(self):
+        self.assertFalse(self.proxy.authorized("http://evil/x.ts", ""))
+        self.assertTrue(self.proxy.authorized("http://known/live.m3u8", ""))
+        self.assertTrue(self.proxy.authorized("http://evil/x.ts",
+                                              self.proxy.sign("http://evil/x.ts")))
+
+    def test_manifest_rewrite(self):
+        manifest = (
+            "#EXTM3U\n"
+            '#EXT-X-KEY:METHOD=AES-128,URI="key.bin"\n'
+            "#EXTINF:10,\n"
+            "seg1.ts\n"
+            "#EXTINF:10,\n"
+            "http://other/seg2.ts\n"
+        )
+        out = self.proxy.rewrite_manifest(manifest, "http://host/live/index.m3u8")
+        self.assertIn("/proxy?u=http%3A%2F%2Fhost%2Flive%2Fseg1.ts&s=", out)
+        self.assertIn("/proxy?u=http%3A%2F%2Fother%2Fseg2.ts&s=", out)
+        self.assertIn('URI="/proxy?u=http%3A%2F%2Fhost%2Flive%2Fkey.bin', out)
+        self.assertIn("#EXTINF:10,", out)          # 其它标签原样保留
+        # 改写后的每个地址都必须能通过签名校验
+        import re as _re
+        import urllib.parse as _up
+        for match in _re.finditer(r"/proxy\?u=([^&\"\s]+)&s=(\w+)", out):
+            self.assertTrue(self.proxy.verify(_up.unquote(match.group(1)), match.group(2)))
+
+    def test_manifest_detection(self):
+        self.assertTrue(self.proxy.looks_like_manifest(b"#EXTM3U\n", ""))
+        self.assertTrue(self.proxy.looks_like_manifest(b"", "application/vnd.apple.mpegurl"))
+        self.assertFalse(self.proxy.looks_like_manifest(b"\x47\x00", "video/mp2t"))
+
+
+class TestFeedback(unittest.TestCase):
+    """反馈：校验、限流、去重。"""
+
+    def setUp(self):
+        import tempfile as _tempfile
+        from iptvhub.feedback import FeedbackService
+        handle, self.path = _tempfile.mkstemp(suffix=".db")
+        os.close(handle)
+        os.unlink(self.path)
+        self.store = Store(self.path)
+        self.store.upsert_candidates([{
+            "url": "http://a/1.m3u8", "channel_key": "CCTV1", "display_name": "CCTV1",
+            "group_title": "央视频道", "host": "a", "sources": []}])
+        self.service = FeedbackService(self.store, lambda: b"test-secret")
+
+    def tearDown(self):
+        self.store.close()
+        for suffix in ("", "-wal", "-shm"):
+            if os.path.exists(self.path + suffix):
+                os.unlink(self.path + suffix)
+
+    def test_submit_and_list(self):
+        status, result = self.service.submit(
+            {"url": "http://a/1.m3u8", "kind": "lag", "message": "晚上卡"}, "1.2.3.4")
+        self.assertEqual(status, 200)
+        self.assertIn("id", result)
+        listing = self.service.listing(url="http://a/1.m3u8")
+        self.assertEqual(listing["total"], 1)
+        self.assertEqual(listing["items"][0]["kind_label"], "卡顿/缓冲")
+        self.assertEqual(listing["items"][0]["nickname"], "匿名")
+
+    def test_rejects_unknown_stream_and_bad_kind(self):
+        self.assertEqual(self.service.submit(
+            {"url": "http://nope/x", "kind": "ok"}, "1.2.3.4")[0], 404)
+        self.assertEqual(self.service.submit(
+            {"url": "http://a/1.m3u8", "kind": "bogus"}, "1.2.3.4")[0], 400)
+        self.assertEqual(self.service.submit(
+            {"url": "http://a/1.m3u8", "kind": "other", "message": ""}, "1.2.3.4")[0], 400)
+
+    def test_duplicate_and_rate_limit(self):
+        payload = {"url": "http://a/1.m3u8", "kind": "lag", "message": "一样的话"}
+        self.assertEqual(self.service.submit(dict(payload), "5.5.5.5")[0], 200)
+        self.assertEqual(self.service.submit(dict(payload), "5.5.5.5")[0], 409)
+        for index in range(12):
+            self.service.submit({"url": "http://a/1.m3u8", "kind": "lag",
+                                 "message": "第%d条" % index}, "6.6.6.6")
+        status, _ = self.service.submit(
+            {"url": "http://a/1.m3u8", "kind": "lag", "message": "再来一条"}, "6.6.6.6")
+        self.assertEqual(status, 429)
+
+    def test_ip_is_not_stored_in_clear(self):
+        self.service.submit({"url": "http://a/1.m3u8", "kind": "ok"}, "9.9.9.9")
+        rows = self.store.list_feedback(url="http://a/1.m3u8")["items"]
+        self.assertNotIn("9.9.9.9", rows[0]["client"])
+        self.assertEqual(len(rows[0]["client"]), 16)
+
+    def test_text_is_trimmed(self):
+        from iptvhub.feedback import MAX_MESSAGE, clean_text
+        self.assertEqual(clean_text("a\x00b", 10), "ab")
+        self.assertEqual(len(clean_text("x" * 999, MAX_MESSAGE)), MAX_MESSAGE)
+
+
 class TestWebAssets(unittest.TestCase):
     """前端资源的静态检查。
 

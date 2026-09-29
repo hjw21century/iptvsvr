@@ -188,3 +188,37 @@ table.compact td, table.compact th { padding: 5px 8px; font-size: 12px; }
 .state-bad { color: var(--bad); }
 
 .box.narrow { width: min(520px, 100%); }
+
+/* ---------------------------------------------------------- 播放源反馈 */
+.stream-row { border-top: 1px solid var(--border); padding: 8px 0; }
+.stream-row:first-child { border-top: none; }
+.stream-main { display: flex; gap: 10px; align-items: center; }
+.stream-main code { flex: 1; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stream-sub { display: flex; gap: 10px; align-items: center; margin-top: 4px; font-size: 12px; color: var(--text-dim); }
+.fb-good { color: var(--ok); }
+.fb-bad { color: var(--warn); }
+
+button.link { background: none; border: none; color: var(--accent); padding: 0; font-size: 12px; cursor: pointer; }
+button.link:hover { text-decoration: underline; }
+
+.fb-panel { margin-top: 8px; padding: 10px; background: var(--bg-elev-2); border-radius: 8px; }
+.fb-panel.hidden { display: none; }
+.fb-kinds { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.fb-kinds .chip { font-size: 12px; }
+.fb-form { display: flex; gap: 8px; flex-wrap: wrap; }
+.fb-form input {
+  background: var(--bg-elev); color: var(--text); border: 1px solid var(--border);
+  border-radius: 6px; padding: 6px 9px; font-size: 13px;
+}
+.fb-form .fb-nick { width: 130px; }
+.fb-form .fb-msg { flex: 1; min-width: 180px; }
+.fb-list { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+.fb-item { display: flex; gap: 8px; align-items: baseline; font-size: 12px; flex-wrap: wrap; }
+.fb-item b { color: var(--text); }
+.fb-item time { color: var(--text-dim); margin-left: auto; font-size: 11px; }
+.fb-tag { border: 1px solid var(--border); border-radius: 999px; padding: 0 7px; color: var(--text-dim); }
+
+@media (max-width: 720px) {
+  .stream-main code { max-width: 140px; }
+  .fb-form .fb-nick { width: 100%; }
+}

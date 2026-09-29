@@ -46,6 +46,7 @@ class AdminApi:
         self.store = store
         self.updater = updater
         self.cache = cache
+        self.feedback = None          # 由 serve() 注入
         self._token: Optional[str] = None
 
     # ------------------------------------------------------------------ 鉴权
@@ -83,6 +84,7 @@ class AdminApi:
             "GET /sources": self._sources,
             "GET /config": self._config,
             "GET /streams": self._streams,
+            "GET /feedback": self._feedback,
             "GET /history": self._history,
             "POST /update": self._update,
             "POST /export": self._export,
@@ -92,6 +94,8 @@ class AdminApi:
             "POST /config": self._save_config,
             "POST /probe": self._probe,
             "POST /stream/delete": self._delete_stream,
+            "POST /feedback/hide": self._hide_feedback,
+            "POST /feedback/delete": self._delete_feedback,
         }
         handler = handlers.get(route)
         if handler is None:
@@ -120,6 +124,7 @@ class AdminApi:
             "auto_update": bool(self.cfg["server"].get("auto_update", True)),
             "update_interval_hours": self.cfg["server"].get("update_interval_hours", 4),
             "data_dir": self.cfg["paths"]["data"],
+            "feedback": self.store.feedback_stats(),
         }
 
     def _progress(self, query, body):
@@ -167,6 +172,31 @@ class AdminApi:
         )
         result["groups"] = self.store.group_names()
         return 200, result
+
+    def _feedback(self, query, body):
+        def one(key, default=""):
+            return query.get(key, [default])[0]
+
+        data = self.store.list_feedback(
+            url=one("url"), channel_key=one("channel"), kind=one("kind"),
+            include_hidden=one("hidden") != "0",
+            limit=min(int(float(one("limit", "80") or 80)), 300),
+            offset=int(float(one("offset", "0") or 0)))
+        from .feedback import KINDS, score_adjustment
+        summary = self.store.feedback_summary()
+        data["kinds"] = KINDS
+        data["stats"] = self.store.feedback_stats()
+        data["adjustments"] = {url: score_adjustment(counts)
+                               for url, counts in summary.items()}
+        return 200, data
+
+    def _hide_feedback(self, query, body):
+        changed = self.store.set_feedback_hidden(int(body.get("id") or 0),
+                                                 bool(body.get("hidden", True)))
+        return 200, {"changed": changed}
+
+    def _delete_feedback(self, query, body):
+        return 200, {"removed": self.store.delete_feedback(int(body.get("id") or 0))}
 
     def _history(self, query, body):
         url = query.get("url", [""])[0]

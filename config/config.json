@@ -36,5 +36,7 @@
     "auto_update": true,
     "update_interval_hours": 4
   },
-  "site_url": "https://iptv.tomeleaf.com"
+  "site_url": "https://iptv.tomeleaf.com",
+  "proxy_enabled": true,
+  "proxy_max_concurrent": 12
 }

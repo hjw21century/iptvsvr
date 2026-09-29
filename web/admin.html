@@ -21,6 +21,7 @@
     <button class="tab active" data-tab="overview">概览与运行</button>
     <button class="tab" data-tab="sources">上游源</button>
     <button class="tab" data-tab="streams">源明细排查</button>
+    <button class="tab" data-tab="feedback">观众反馈</button>
     <button class="tab" data-tab="settings">参数</button>
   </nav>
 
@@ -112,6 +113,23 @@
       </tr></thead><tbody id="streamsBody"></tbody></table>
       <div class="pager"><button id="prevPage">上一页</button>
         <span id="pageInfo">—</span><button id="nextPage">下一页</button></div>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------ 观众反馈 -->
+  <section class="tabpage hidden" id="page-feedback">
+    <div class="panel">
+      <div class="controls">
+        <select id="fbKind"><option value="">全部类型</option></select>
+        <label class="check"><input type="checkbox" id="fbHidden" checked> 显示已隐藏</label>
+        <button id="fbReload" class="primary">刷新</button>
+        <span class="sub" id="fbStats"></span>
+      </div>
+      <table class="compact"><thead><tr>
+        <th style="width:130px">时间</th><th>频道</th><th style="width:90px">类型</th>
+        <th>留言</th><th class="hide-sm">昵称</th><th class="hide-sm">地址</th>
+        <th style="width:120px">操作</th>
+      </tr></thead><tbody id="feedbackBody"></tbody></table>
     </div>
   </section>
 

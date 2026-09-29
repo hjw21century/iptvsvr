@@ -256,6 +256,41 @@
     el("detailModal").classList.add("open");
   }
 
+  // ------------------------------------------------------------- 反馈
+  function loadFeedback() {
+    var params = new URLSearchParams({
+      kind: el("fbKind").value,
+      hidden: el("fbHidden").checked ? "1" : "0",
+      limit: 200
+    });
+    api("/feedback?" + params.toString()).then(function (data) {
+      var stats = data.stats || {};
+      el("fbStats").textContent = "共 " + (stats.total || 0) + " 条 · 24 小时内 " +
+        (stats.last_24h || 0) + " 条 · 已隐藏 " + (stats.hidden || 0) + " 条";
+      if (el("fbKind").options.length <= 1 && data.kinds) {
+        el("fbKind").insertAdjacentHTML("beforeend", Object.keys(data.kinds).map(function (k) {
+          return '<option value="' + k + '">' + esc(data.kinds[k]) + "</option>";
+        }).join(""));
+      }
+      el("feedbackBody").innerHTML = (data.items || []).map(function (item) {
+        var label = (data.kinds && data.kinds[item.kind]) || item.kind;
+        var bad = ["lag", "black", "nosound", "dead"].indexOf(item.kind) >= 0;
+        return "<tr" + (item.hidden ? ' style="opacity:.45"' : "") + ">" +
+          "<td>" + timeOf(item.created_at) + "</td>" +
+          "<td>" + esc(item.channel_name || "—") + "</td>" +
+          '<td class="' + (bad ? "state-bad" : "state-ok") + '">' + esc(label) + "</td>" +
+          "<td>" + esc(item.message || "—") + "</td>" +
+          '<td class="hide-sm">' + esc(item.nickname || "匿名") + "</td>" +
+          '<td class="hide-sm"><code>' + esc((item.url || "").slice(0, 44)) + "</code></td>" +
+          '<td><div class="row-actions">' +
+            '<button data-fbhide="' + item.id + '" data-to="' + (item.hidden ? 0 : 1) + '">' +
+              (item.hidden ? "取消隐藏" : "隐藏") + "</button>" +
+            '<button data-fbdel="' + item.id + '">删除</button>' +
+          "</div></td></tr>";
+      }).join("") || '<tr><td colspan="7" class="empty">暂无反馈</td></tr>';
+    }).catch(function (err) { toast("加载失败：" + err.message); });
+  }
+
   // ------------------------------------------------------------- 参数
   var FIELD_LABELS = {
     concurrency: "全局并发探测数", per_host_concurrency: "单主机并发上限",
@@ -370,6 +405,8 @@
       }
     } else if (S.tab === "streams") {
       if (force || !S.loaded.streams) { S.loaded.streams = true; loadStreams(true); }
+    } else if (S.tab === "feedback") {
+      if (force || !S.loaded.feedback) { S.loaded.feedback = true; loadFeedback(); }
     } else if (S.tab === "settings") {
       if (force || !S.loaded.settings) {
         api("/config").then(function (data) { S.loaded.settings = true; renderSettings(data); });
@@ -502,6 +539,23 @@
         if (!confirm("从库中删除该源？若上游仍收录，下轮会重新加入。")) return;
         api("/stream/delete", { method: "POST", body: { url: button.dataset.rm } })
           .then(function () { toast("已删除"); loadStreams(false); });
+      }
+    });
+
+    el("fbReload").onclick = loadFeedback;
+    el("fbKind").addEventListener("change", loadFeedback);
+    el("fbHidden").addEventListener("change", loadFeedback);
+    el("feedbackBody").addEventListener("click", function (event) {
+      var button = event.target.closest("button");
+      if (!button) return;
+      if (button.dataset.fbhide) {
+        api("/feedback/hide", { method: "POST",
+          body: { id: Number(button.dataset.fbhide), hidden: button.dataset.to === "1" } })
+          .then(loadFeedback);
+      } else if (button.dataset.fbdel) {
+        if (!confirm("删除这条反馈？")) return;
+        api("/feedback/delete", { method: "POST", body: { id: Number(button.dataset.fbdel) } })
+          .then(loadFeedback);
       }
     });
 

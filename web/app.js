@@ -177,6 +177,13 @@
 
   // ---------------------------------------------------------------- 播放
   var hlsInstance = null;
+  var currentChannel = null;
+
+  /* 网页播放必须经本站 HTTPS 中转：源站是 http:// 且不带 CORS 头，
+     浏览器会以混合内容 + 跨域两条规则拦截（VLC 等播放器没有这些限制）。 */
+  function playable(url) {
+    return "/proxy?u=" + encodeURIComponent(url);
+  }
 
   function loadHls(callback) {
     if (window.Hls) return callback();
@@ -187,23 +194,84 @@
     document.head.appendChild(script);
   }
 
+  /* ------------------------------------------------------------ 反馈 */
+  var FEEDBACK_KINDS = [
+    ["ok", "能正常看"], ["lag", "卡顿/缓冲"], ["black", "黑屏/花屏"],
+    ["nosound", "没有声音"], ["dead", "打不开"], ["other", "其它"]
+  ];
+  var feedbackState = { summary: {}, items: [], openUrl: "" };
+
+  function feedbackBadges(url) {
+    var counts = feedbackState.summary[url] || {};
+    var good = counts.ok || 0;
+    var bad = (counts.lag || 0) + (counts.black || 0) + (counts.nosound || 0) + (counts.dead || 0);
+    var parts = [];
+    if (good) parts.push('<span class="fb-good">👍 ' + good + "</span>");
+    if (bad) parts.push('<span class="fb-bad">⚠ ' + bad + "</span>");
+    return parts.join(" ");
+  }
+
+  function renderStreams(channel) {
+    el("streamList").innerHTML = (channel.streams || []).map(function (stream, index) {
+      var label = index === 0 ? "主源" : "备用" + index;
+      var mine = feedbackState.items.filter(function (item) { return item.url === stream.url; });
+      return '<div class="stream-row" data-url="' + escapeHtml(stream.url) + '">' +
+        '<div class="stream-main">' +
+          "<span>" + label + "</span>" +
+          "<code>" + escapeHtml(stream.url) + "</code>" +
+          "<span>" + humanKbps(stream.kbps) + "</span>" +
+          '<button data-switch="' + escapeHtml(stream.url) + '">播放</button>' +
+        "</div>" +
+        '<div class="stream-sub">' + feedbackBadges(stream.url) +
+          '<button class="link" data-fb="' + escapeHtml(stream.url) + '">留言反馈' +
+          (mine.length ? "（" + mine.length + "）" : "") + "</button></div>" +
+        '<div class="fb-panel' + (feedbackState.openUrl === stream.url ? "" : " hidden") +
+          '" data-panel="' + escapeHtml(stream.url) + '">' +
+          '<div class="fb-kinds">' + FEEDBACK_KINDS.map(function (kind) {
+            return '<button class="chip" data-kind="' + kind[0] + '">' + kind[1] + "</button>";
+          }).join("") + "</div>" +
+          '<div class="fb-form">' +
+            '<input type="text" class="fb-nick" maxlength="24" placeholder="昵称（可选）">' +
+            '<input type="text" class="fb-msg" maxlength="300" placeholder="说点什么，例如：晚上高峰卡顿">' +
+            '<button class="primary" data-send="' + escapeHtml(stream.url) + '">提交</button>' +
+          "</div>" +
+          '<div class="fb-list">' + (mine.length ? mine.map(function (item) {
+            return '<div class="fb-item"><b>' + escapeHtml(item.nickname) + "</b>" +
+              '<span class="fb-tag">' + escapeHtml(item.kind_label) + "</span>" +
+              "<span>" + escapeHtml(item.message) + "</span>" +
+              '<time>' + new Date(item.created_at * 1000).toLocaleString("zh-CN",
+                { hour12: false }) + "</time></div>";
+          }).join("") : '<div class="sub">还没有反馈，欢迎第一个留言</div>') + "</div>" +
+        "</div></div>";
+    }).join("");
+  }
+
+  function loadFeedback(channel) {
+    return fetch("/api/feedback?limit=100&channel=" + encodeURIComponent(channel.key))
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        feedbackState.summary = data.summary || {};
+        feedbackState.items = data.items || [];
+        renderStreams(channel);
+      }).catch(function () { renderStreams(channel); });
+  }
+
   function play(channel, url) {
     var video = el("player");
     el("modalTitle").textContent = channel.name;
     el("modal").classList.add("open");
+    currentChannel = channel;
 
-    el("streamList").innerHTML = (channel.streams || []).map(function (stream, index) {
-      return "<div><span>" + (index === 0 ? "主源" : "备用" + index) + "</span>" +
-        "<code>" + escapeHtml(stream.url) + "</code>" +
-        "<span>" + humanKbps(stream.kbps) + "</span>" +
-        '<button data-switch="' + escapeHtml(stream.url) + '">播放</button></div>';
-    }).join("");
+    feedbackState.summary = {};
+    feedbackState.items = [];
+    renderStreams(channel);
+    loadFeedback(channel);
 
-    var target = url || channel.url;
+    var target = playable(url || channel.url);
     if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
 
     loadHls(function () {
-      if (window.Hls && window.Hls.isSupported() && /\.m3u8(\?|$)/i.test(target)) {
+      if (window.Hls && window.Hls.isSupported()) {
         hlsInstance = new window.Hls({ maxBufferLength: 10 });
         hlsInstance.loadSource(target);
         hlsInstance.attachMedia(video);
@@ -308,11 +376,56 @@
     });
 
     el("streamList").addEventListener("click", function (event) {
-      var button = event.target.closest("button[data-switch]");
+      var button = event.target.closest("button");
       if (!button) return;
-      var title = el("modalTitle").textContent;
-      var channel = state.channels.find(function (c) { return c.name === title; });
-      if (channel) play(channel, button.dataset.switch);
+
+      if (button.dataset.switch) {
+        if (currentChannel) play(currentChannel, button.dataset.switch);
+        return;
+      }
+
+      if (button.dataset.fb) {
+        feedbackState.openUrl = feedbackState.openUrl === button.dataset.fb
+          ? "" : button.dataset.fb;
+        if (currentChannel) renderStreams(currentChannel);
+        return;
+      }
+
+      if (button.dataset.kind) {
+        var group = button.closest(".fb-kinds");
+        group.querySelectorAll(".chip").forEach(function (chip) {
+          chip.classList.toggle("active", chip === button);
+        });
+        return;
+      }
+
+      if (button.dataset.send) {
+        var panel = button.closest(".fb-panel");
+        var active = panel.querySelector(".chip.active");
+        var body = {
+          url: button.dataset.send,
+          kind: active ? active.dataset.kind : "other",
+          nickname: panel.querySelector(".fb-nick").value,
+          message: panel.querySelector(".fb-msg").value
+        };
+        if (!active && !body.message.trim()) {
+          toast("请先选一个情况，或写点说明");
+          return;
+        }
+        button.disabled = true;
+        fetch("/api/feedback", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body)
+        }).then(function (r) {
+          return r.json().then(function (payload) { return { ok: r.ok, payload: payload }; });
+        }).then(function (result) {
+          if (!result.ok) { toast(result.payload.error || "提交失败"); return; }
+          toast("感谢反馈");
+          if (currentChannel) loadFeedback(currentChannel);
+        }).catch(function () { toast("提交失败"); })
+          .then(function () { button.disabled = false; });
+      }
     });
 
     el("copySub").onclick = function () { copy(subscriptionUrl()); };

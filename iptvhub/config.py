@@ -16,6 +16,10 @@ DEFAULTS: Dict[str, Any] = {
     # 对外访问地址，用于播放列表头部标注来源；留空则不输出
     "site_url": "",
 
+    # 网页内播放用的中转：浏览器有混合内容与跨域限制，必须经本站转一道
+    "proxy_enabled": True,
+    "proxy_max_concurrent": 12,
+
     # 播放器用的 EPG（节目单）地址，会写进 M3U 头部 x-tvg-url
     "epg_url": "https://live.fanmingming.cn/e.xml",
 
