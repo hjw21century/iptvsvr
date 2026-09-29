@@ -390,3 +390,31 @@ button.link:hover { text-decoration: underline; }
 
 .rank-bar { height: 6px; border-radius: 3px; background: var(--viz-track); overflow: hidden; }
 .rank-bar > i { display: block; height: 100%; background: var(--viz-series); border-radius: 3px 0 0 3px; }
+
+/* ------------------------------------------------------------ 登录页 */
+.login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+.login-box {
+  width: min(360px, 100%); background: var(--bg-elev); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 30px 26px 24px; text-align: center;
+}
+.login-logo { font-size: 38px; line-height: 1; }
+.login-box h1 { margin: 8px 0 2px; font-size: 20px; letter-spacing: .5px; }
+.login-box .sub { color: var(--text-dim); font-size: 13px; margin: 0 0 20px; }
+.login-field { display: block; text-align: left; margin-bottom: 14px; }
+.login-field span { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 5px; }
+.login-field input {
+  width: 100%; box-sizing: border-box; background: var(--bg-elev-2); color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; font-size: 14px;
+}
+.login-field input:focus { outline: none; border-color: var(--accent); }
+.login-box button.primary { width: 100%; padding: 10px; font-size: 14px; margin-top: 4px; }
+.login-error { color: var(--bad); font-size: 13px; min-height: 18px; margin: 10px 0 0; }
+.login-foot { color: var(--text-dim); font-size: 11px; line-height: 1.7; margin: 14px 0 0; }
+
+.user-chip {
+  display: inline-flex; align-items: center; gap: 8px; font-size: 12px;
+  color: var(--text-dim); border: 1px solid var(--border); border-radius: 999px;
+  padding: 3px 10px;
+}
+.user-chip b { color: var(--text); font-weight: 600; }
+.user-chip .role { color: var(--accent); }

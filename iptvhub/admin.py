@@ -54,6 +54,7 @@ class AdminApi:
         self.proxy = proxy
         self.feedback = None          # 由 serve() 注入
         self.analytics = None
+        self.auth = None
         self._token: Optional[str] = None
 
     # ------------------------------------------------------------------ 鉴权
@@ -93,6 +94,7 @@ class AdminApi:
             "GET /streams": self._streams,
             "GET /feedback": self._feedback,
             "GET /analytics": self._analytics,
+            "GET /users": self._users,
             "GET /history": self._history,
             "POST /update": self._update,
             "POST /export": self._export,
@@ -102,6 +104,12 @@ class AdminApi:
             "POST /config": self._save_config,
             "POST /probe": self._probe,
             "POST /stream/delete": self._delete_stream,
+            "POST /users/add": self._add_user,
+            "POST /users/password": self._set_password,
+            "POST /users/role": self._set_role,
+            "POST /users/disable": self._set_disabled,
+            "POST /users/key": self._regen_key,
+            "POST /users/delete": self._delete_user,
             "POST /feedback/hide": self._hide_feedback,
             "POST /feedback/delete": self._delete_feedback,
         }
@@ -135,6 +143,7 @@ class AdminApi:
             "feedback": self.store.feedback_stats(),
             "proxy": self.proxy.meter.snapshot() if self.proxy else None,
             "notice": load_active(self.cfg["paths"]["config"]),
+            "users": len(self.auth.list_users()) if self.auth else 0,
         }
 
     def _progress(self, query, body):
@@ -211,6 +220,79 @@ class AdminApi:
         payload["proxy"] = self.proxy.meter.snapshot() if self.proxy else None
         payload["feedback_stats"] = self.store.feedback_stats()
         return 200, payload
+
+    # ------------------------------------------------------------------ 账号
+    def _users(self, query, body):
+        if not self.auth:
+            return 503, {"error": "账号系统未启用"}
+        return 200, {
+            "users": self.auth.list_users(),
+            "sessions": self.auth.active_sessions(),
+            "require_login": self.auth.require_login,
+            "session_days": self.auth.session_days,
+        }
+
+    def _guard(self, body, need_username=True):
+        if not self.auth:
+            return None, (503, {"error": "账号系统未启用"})
+        username = str(body.get("username") or "").strip()
+        if need_username and not username:
+            return None, (400, {"error": "缺少用户名"})
+        return username, None
+
+    def _add_user(self, query, body):
+        username, err = self._guard(body)
+        if err:
+            return err
+        try:
+            user = self.auth.create_user(username, str(body.get("password") or ""),
+                                         str(body.get("role") or "user"),
+                                         str(body.get("note") or ""))
+        except ValueError as exc:
+            return 400, {"error": str(exc)}
+        return 200, {"user": {k: v for k, v in user.items() if k != "password"}}
+
+    def _set_password(self, query, body):
+        username, err = self._guard(body)
+        if err:
+            return err
+        try:
+            ok = self.auth.set_password(username, str(body.get("password") or ""))
+        except ValueError as exc:
+            return 400, {"error": str(exc)}
+        self.auth.destroy_user_sessions(username)   # 改密后旧登录一律失效
+        return 200, {"ok": ok, "note": "该账号已登录的设备需要重新登录"}
+
+    def _set_role(self, query, body):
+        username, err = self._guard(body)
+        if err:
+            return err
+        try:
+            return 200, {"ok": self.auth.set_role(username, str(body.get("role") or "user"))}
+        except ValueError as exc:
+            return 400, {"error": str(exc)}
+
+    def _set_disabled(self, query, body):
+        username, err = self._guard(body)
+        if err:
+            return err
+        return 200, {"ok": self.auth.set_disabled(username, bool(body.get("disabled")))}
+
+    def _regen_key(self, query, body):
+        username, err = self._guard(body)
+        if err:
+            return err
+        return 200, {"sub_key": self.auth.regenerate_key(username)}
+
+    def _delete_user(self, query, body):
+        username, err = self._guard(body)
+        if err:
+            return err
+        admins = [u for u in self.auth.list_users()
+                  if u["role"] == "admin" and not u["disabled"]]
+        if len(admins) <= 1 and any(u["username"] == username for u in admins):
+            return 400, {"error": "这是最后一个可用的管理员，不能删除"}
+        return 200, {"removed": self.auth.delete_user(username)}
 
     def _hide_feedback(self, query, body):
         changed = self.store.set_feedback_hidden(int(body.get("id") or 0),

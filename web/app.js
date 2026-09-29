@@ -9,6 +9,7 @@
     sort: { key: "score", desc: true },
     pageSize: 300,
     static: false,
+    user: null,
     shown: 0
   };
 
@@ -48,7 +49,7 @@
   }
 
   // ------------------------------------------------------------ 订阅链接
-  function params(extra) {
+  function params(extra) {   // extra 里可以带订阅密钥等附加参数
     var search = new URLSearchParams();
     if (state.group) search.set("group", state.group);
     var q = el("q").value.trim();
@@ -66,7 +67,9 @@
     if (state.static) {
       return new URL("playlist.m3u", location.href).href;  // 静态导出模式没有动态过滤
     }
-    return location.origin + "/playlist.m3u" + params();
+    // 播放器没法登录，订阅地址里带上账号的订阅密钥
+    var extra = state.user && state.user.sub_key ? { key: state.user.sub_key } : {};
+    return location.origin + "/playlist.m3u" + params(extra);
   }
 
   function updateSubUrl() {
@@ -446,7 +449,8 @@
   function bindPlayerTip() {
     el("tipCopy").onclick = function () { copy(subscriptionUrl()); };
     el("tipDownload").onclick = function () {
-      location.href = state.static ? "playlist.m3u" : "/playlist.m3u" + params();
+      var extra = state.user && state.user.sub_key ? { key: state.user.sub_key } : {};
+      location.href = state.static ? "playlist.m3u" : "/playlist.m3u" + params(extra);
     };
     el("tipGuide").onclick = openGuide;
     el("guideClose").onclick = function () { el("guideModal").classList.remove("open"); };
@@ -526,11 +530,37 @@
   /* 既支持后端 API，也支持"纯静态导出"模式（无 API 时回退读取同目录 channels.json） */
   function fetchJson(primary, fallback) {
     return fetch(primary).then(function (r) {
+      if (r.status === 401) {          // 会话过期：回登录页
+        location.href = "/login";
+        throw new Error("unauthorized");
+      }
       if (!r.ok) throw new Error(r.status);
       return r.json();
-    }).catch(function () {
+    }).catch(function (err) {
+      if (err && err.message === "unauthorized") throw err;
       return fetch(fallback).then(function (r) { return r.json(); });
     });
+  }
+
+  /* 登录信息：头部显示当前账号与退出入口 */
+  function loadMe() {
+    return fetch("/api/me").then(function (r) { return r.json(); }).then(function (data) {
+      state.user = data.user;
+      if (!data.user) { el("userBox").innerHTML = ""; return; }
+      el("userBox").innerHTML =
+        '<span class="user-chip"><b>' + escapeHtml(data.user.username) + "</b>" +
+        (data.user.is_admin ? '<span class="role">管理员</span>' : "") +
+        '<button class="link" id="logoutBtn">退出</button></span>' +
+        (data.user.is_admin ? ' <a href="/admin">后台</a>' : "");
+      var button = el("logoutBtn");
+      if (button) {
+        button.onclick = function () {
+          fetch("/api/logout", { method: "POST" }).then(function () {
+            location.href = "/login";
+          });
+        };
+      }
+    }).catch(function () { /* 未登录也不影响静态导出模式 */ });
   }
 
   function loadStats() {
@@ -651,7 +681,8 @@
 
     el("copySub").onclick = function () { copy(subscriptionUrl()); };
     el("openSub").onclick = function () {
-      location.href = state.static ? "playlist.m3u" : "/playlist.m3u" + params();
+      var extra = state.user && state.user.sub_key ? { key: state.user.sub_key } : {};
+      location.href = state.static ? "playlist.m3u" : "/playlist.m3u" + params(extra);
     };
     el("refreshBtn").onclick = function () { loadStats(); loadChannels(); };
     el("modalClose").onclick = closeModal;
@@ -678,6 +709,7 @@
 
   bind();
   bindPlayerTip();
+  loadMe();
   loadNotice();
   loadStats();
   loadChannels();

@@ -457,6 +457,99 @@ class TestDirectPlayback(unittest.TestCase):
         self.assertGreater(direct, plain)
 
 
+class TestAuth(unittest.TestCase):
+    """账号、密码哈希、会话与角色。"""
+
+    def setUp(self):
+        from iptvhub.auth import Auth
+        handle, self.path = tempfile.mkstemp(suffix=".db")
+        os.close(handle)
+        os.unlink(self.path)
+        self.store = Store(self.path)
+        self.auth = Auth(self.store, {"session_days": 7})
+        self.auth.create_user("boss", "topsecret", "admin")
+        self.auth.create_user("viewer", "hunter22", "user")
+
+    def tearDown(self):
+        self.store.close()
+        for suffix in ("", "-wal", "-shm"):
+            if os.path.exists(self.path + suffix):
+                os.unlink(self.path + suffix)
+
+    def test_password_is_hashed_not_stored(self):
+        from iptvhub.auth import hash_password, verify_password
+        stored = self.auth.get_user("boss")["password"]
+        self.assertTrue(stored.startswith("pbkdf2_sha256$"))
+        self.assertNotIn("topsecret", stored)
+        self.assertTrue(verify_password(stored, "topsecret"))
+        self.assertFalse(verify_password(stored, "topsecre"))
+        # 同一密码两次哈希不同（加盐）
+        self.assertNotEqual(hash_password("x"), hash_password("x"))
+
+    def test_authenticate(self):
+        self.assertIsNotNone(self.auth.authenticate("boss", "topsecret", "1.1.1.1"))
+        self.assertIsNone(self.auth.authenticate("boss", "wrong", "1.1.1.1"))
+        self.assertIsNone(self.auth.authenticate("nobody", "topsecret", "1.1.1.1"))
+
+    def test_login_throttle(self):
+        for _ in range(8):
+            self.auth.authenticate("boss", "wrong", "9.9.9.9")
+        with self.assertRaises(PermissionError):
+            self.auth.authenticate("boss", "topsecret", "9.9.9.9")
+        # 换个 IP 不受影响
+        self.assertIsNotNone(self.auth.authenticate("boss", "topsecret", "8.8.8.8"))
+
+    def test_sessions(self):
+        token = self.auth.create_session("viewer", "1.2.3.4", "iPhone")
+        self.assertEqual(self.auth.session_user(token)["username"], "viewer")
+        self.auth.destroy_session(token)
+        self.assertIsNone(self.auth.session_user(token))
+        self.assertIsNone(self.auth.session_user("bogus"))
+
+    def test_expired_session_rejected(self):
+        token = self.auth.create_session("viewer")
+        conn = self.store._connect()
+        with conn:
+            conn.execute("UPDATE sessions SET expires_at = ?", (int(time.time()) - 10,))
+        self.assertIsNone(self.auth.session_user(token))
+        self.assertEqual(self.auth.purge_expired(), 1)
+
+    def test_disabled_user_cannot_login_and_loses_sessions(self):
+        token = self.auth.create_session("viewer")
+        self.auth.set_disabled("viewer", True)
+        self.assertIsNone(self.auth.session_user(token))
+        self.assertIsNone(self.auth.authenticate("viewer", "hunter22", "1.1.1.1"))
+
+    def test_subscription_key(self):
+        key = self.auth.get_user("viewer")["sub_key"]
+        self.assertEqual(self.auth.user_by_key(key)["username"], "viewer")
+        new_key = self.auth.regenerate_key("viewer")
+        self.assertNotEqual(key, new_key)
+        self.assertIsNone(self.auth.user_by_key(key))          # 旧密钥立刻失效
+        self.assertIsNone(self.auth.user_by_key("short"))
+
+    def test_password_change_revokes_sessions(self):
+        token = self.auth.create_session("viewer")
+        self.auth.set_password("viewer", "brandnew1")
+        self.auth.destroy_user_sessions("viewer")
+        self.assertIsNone(self.auth.session_user(token))
+        self.assertIsNotNone(self.auth.authenticate("viewer", "brandnew1", "1.1.1.1"))
+
+    def test_validation(self):
+        with self.assertRaises(ValueError):
+            self.auth.create_user("x", "123", "user")          # 密码太短
+        with self.assertRaises(ValueError):
+            self.auth.create_user("boss", "longenough", "user")  # 重名
+        with self.assertRaises(ValueError):
+            self.auth.create_user("y", "longenough", "root")     # 角色非法
+
+    def test_public_view_hides_hash(self):
+        public = self.auth.public(self.auth.get_user("boss"))
+        self.assertTrue(public["is_admin"])
+        self.assertNotIn("password", public)
+        self.assertNotIn("password", self.auth.list_users()[0])
+
+
 class TestAnalytics(unittest.TestCase):
     """访客与流量统计：按天聚合、UV 去重、频道榜、清理。"""
 
@@ -738,8 +831,10 @@ class TestWebAssets(unittest.TestCase):
     """
 
     WEB = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web")
-    PAIRS = [("admin.js", "admin.html"), ("app.js", "index.html")]
-    DYNAMIC_IDS = {"moreBtn", "welcomeEnter", "guideCopy", "guideUrl"}  # 由 JS 运行时插入
+    PAIRS = [("admin.js", "admin.html"), ("app.js", "index.html"),
+             ("login.js", "login.html")]
+    # 这些 id 由 JS 在运行时插入，静态 HTML 里没有
+    DYNAMIC_IDS = {"moreBtn", "welcomeEnter", "guideCopy", "guideUrl", "logoutBtn"}
 
     def test_js_syntax(self):
         try:

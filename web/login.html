@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>登录 · IPTV-Hub</title>
+<link rel="stylesheet" href="static/style.css">
+</head>
+<body>
+<div class="login-wrap">
+  <form class="login-box" id="loginForm" autocomplete="on">
+    <div class="login-logo">📡</div>
+    <h1>IPTV-Hub</h1>
+    <p class="sub">请登录后使用</p>
+
+    <label class="login-field">
+      <span>用户名</span>
+      <input type="text" id="username" name="username" autocomplete="username"
+             autocapitalize="none" autocorrect="off" required>
+    </label>
+    <label class="login-field">
+      <span>密码</span>
+      <input type="password" id="password" name="password"
+             autocomplete="current-password" required>
+    </label>
+
+    <button type="submit" class="primary" id="loginBtn">登录</button>
+    <p class="login-error" id="loginError"></p>
+    <p class="login-foot">登录状态保留 14 天；播放器订阅请在登录后到首页复制带密钥的地址。</p>
+  </form>
+</div>
+<script src="static/login.js"></script>
+</body>
+</html>

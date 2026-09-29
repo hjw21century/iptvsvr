@@ -476,6 +476,50 @@
     }).catch(function (err) { toast("加载失败：" + err.message); });
   }
 
+  // ------------------------------------------------------------- 账号
+  function loadUsers() {
+    api("/users").then(function (data) {
+      el("usersBody").innerHTML = (data.users || []).map(function (u) {
+        return "<tr" + (u.disabled ? ' style="opacity:.5"' : "") + ">" +
+          "<td><b>" + esc(u.username) + "</b>" +
+            (u.disabled ? ' <span class="badge">已停用</span>' : "") + "</td>" +
+          '<td><span class="badge ' + (u.role === "admin" ? "hd" : "") + '">' +
+            (u.role === "admin" ? "管理员" : "普通用户") + "</span></td>" +
+          '<td class="hide-sm">' + esc(u.note || "—") + "</td>" +
+          '<td class="hide-sm">' + (u.last_login ? timeOf(u.last_login) : "从未") + "</td>" +
+          "<td><code>" + esc(u.sub_key) + "</code></td>" +
+          '<td><div class="row-actions">' +
+            '<button data-pass="' + esc(u.username) + '">改密</button>' +
+            '<button data-role="' + esc(u.username) + '" data-to="' +
+              (u.role === "admin" ? "user" : "admin") + '">转为' +
+              (u.role === "admin" ? "普通" : "管理") + "</button>" +
+            '<button data-key="' + esc(u.username) + '">换密钥</button>' +
+            '<button data-toggle="' + esc(u.username) + '" data-disabled="' +
+              (u.disabled ? "0" : "1") + '">' + (u.disabled ? "启用" : "停用") + "</button>" +
+            '<button data-del="' + esc(u.username) + '">删除</button>' +
+          "</div></td></tr>";
+      }).join("") || '<tr><td colspan="6" class="empty">还没有账号</td></tr>';
+
+      el("usersHint").textContent = "前台强制登录：" + (data.require_login ? "已开启" : "已关闭") +
+        " · 登录状态保留 " + data.session_days + " 天 · 订阅密钥供 VLC 等播放器在地址里带着用" +
+        "（改密码会让该账号已登录的设备全部失效）";
+
+      el("sessionsBody").innerHTML = (data.sessions || []).map(function (sess) {
+        return "<tr><td>" + esc(sess.username) + "</td><td>" + timeOf(sess.created_at) +
+          "</td><td>" + timeOf(sess.expires_at) + '</td><td class="hide-sm"><code>' +
+          esc(sess.ip || "—") + '</code></td><td class="hide-sm">' +
+          esc(sess.device || "—").slice(0, 40) + "</td></tr>";
+      }).join("") || '<tr><td colspan="5" class="empty">没有活动会话</td></tr>';
+    }).catch(function (err) { toast("加载失败：" + err.message); });
+  }
+
+  function userAction(path, body, okMessage) {
+    api(path, { method: "POST", body: body }).then(function (data) {
+      toast(okMessage || (data.note || "已完成"));
+      loadUsers();
+    }).catch(function (err) { toast("失败：" + err.message); });
+  }
+
   // ------------------------------------------------------------- 参数
   var FIELD_LABELS = {
     concurrency: "全局并发探测数", per_host_concurrency: "单主机并发上限",
@@ -600,6 +644,8 @@
       if (force || !S.loaded.traffic) { S.loaded.traffic = true; loadTraffic(); }
     } else if (S.tab === "feedback") {
       if (force || !S.loaded.feedback) { S.loaded.feedback = true; loadFeedback(); }
+    } else if (S.tab === "users") {
+      if (force || !S.loaded.users) { S.loaded.users = true; loadUsers(); }
     } else if (S.tab === "settings") {
       if (force || !S.loaded.settings) {
         api("/config").then(function (data) { S.loaded.settings = true; renderSettings(data); });
@@ -625,7 +671,9 @@
     el("lockBtn").onclick = function () {
       localStorage.removeItem(TOKEN_KEY);
       S.token = "";
-      showAuth("已退出");
+      fetch("/api/logout", { method: "POST" }).then(function () {
+        location.href = "/login";
+      }).catch(function () { showAuth("已退出"); });
     };
 
     document.querySelectorAll("[data-run]").forEach(function (button) {
@@ -735,6 +783,39 @@
       }
     });
 
+    el("addUser").onclick = function () {
+      userAction("/users/add", {
+        username: el("newUser").value.trim(),
+        password: el("newPass").value,
+        role: el("newRole").value,
+        note: el("newNote").value.trim()
+      }, "已创建账号");
+      el("newUser").value = el("newPass").value = el("newNote").value = "";
+    };
+
+    el("usersBody").addEventListener("click", function (event) {
+      var button = event.target.closest("button");
+      if (!button) return;
+      var data = button.dataset;
+      if (data.pass) {
+        var password = prompt("给 " + data.pass + " 设置新密码（至少 6 位）");
+        if (password) userAction("/users/password", { username: data.pass, password: password });
+      } else if (data.role) {
+        userAction("/users/role", { username: data.role, role: data.to }, "角色已修改");
+      } else if (data.key) {
+        if (confirm("换发订阅密钥后，该账号原来的订阅地址会立即失效，继续？")) {
+          userAction("/users/key", { username: data.key }, "已换发订阅密钥");
+        }
+      } else if (data.toggle) {
+        userAction("/users/disable",
+                   { username: data.toggle, disabled: data.disabled === "1" });
+      } else if (data.del) {
+        if (confirm("删除账号 " + data.del + "？该账号的登录状态与订阅地址都会失效。")) {
+          userAction("/users/delete", { username: data.del }, "已删除");
+        }
+      }
+    });
+
     el("trafficReload").onclick = loadTraffic;
     var resizeTimer = null;
     window.addEventListener("resize", function () {
@@ -790,9 +871,16 @@
   }
 
   bind();
-  if (S.token) {
-    tryToken(S.token).catch(function () { showAuth("令牌无效，请重新输入"); });
-  } else {
-    showAuth();
-  }
+  // 已用管理员身份登录时直接进；否则回退到令牌（给脚本/自动化留的口子）
+  api("/summary").then(function (data) {
+    hideAuth();
+    renderSummary(data);
+    startPolling();
+  }).catch(function () {
+    if (S.token) {
+      tryToken(S.token).catch(function () { showAuth("令牌无效，请重新输入"); });
+    } else {
+      showAuth();
+    }
+  });
 })();

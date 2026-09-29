@@ -23,6 +23,7 @@
     <button class="tab" data-tab="streams">源明细排查</button>
     <button class="tab" data-tab="traffic">流量与访客</button>
     <button class="tab" data-tab="feedback">观众反馈</button>
+    <button class="tab" data-tab="users">账号</button>
     <button class="tab" data-tab="settings">参数</button>
   </nav>
 
@@ -170,6 +171,39 @@
         <th class="hide-sm">设备</th><th class="hide-sm">播放源</th>
         <th style="width:120px">操作</th>
       </tr></thead><tbody id="feedbackBody"></tbody></table>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------ 账号 -->
+  <section class="tabpage hidden" id="page-users">
+    <div class="panel">
+      <h3>新增账号</h3>
+      <div class="controls">
+        <input type="text" id="newUser" placeholder="用户名" style="width:140px">
+        <input type="password" id="newPass" placeholder="密码（至少 6 位）" style="width:180px">
+        <select id="newRole">
+          <option value="user">普通用户</option>
+          <option value="admin">管理员</option>
+        </select>
+        <input type="text" id="newNote" placeholder="备注（可选）" style="width:150px">
+        <button class="primary" id="addUser">创建</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>账号列表</h3>
+      <table><thead><tr>
+        <th>用户名</th><th style="width:96px">角色</th><th class="hide-sm">备注</th>
+        <th class="hide-sm">最后登录</th><th>订阅密钥</th><th style="width:230px">操作</th>
+      </tr></thead><tbody id="usersBody"></tbody></table>
+      <p class="sub" id="usersHint"></p>
+    </div>
+
+    <div class="panel">
+      <h3>当前登录会话</h3>
+      <table class="compact"><thead><tr>
+        <th>账号</th><th>登录时间</th><th>到期</th><th class="hide-sm">IP</th><th class="hide-sm">设备</th>
+      </tr></thead><tbody id="sessionsBody"></tbody></table>
     </div>
   </section>
 

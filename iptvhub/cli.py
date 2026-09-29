@@ -98,6 +98,79 @@ def cmd_token(args) -> int:
     return 0
 
 
+def cmd_user(args) -> int:
+    """账号管理：add / list / passwd / role / delete / key / disable。"""
+    import getpass
+    from .auth import Auth
+    from .store import Store
+    cfg = load_config(args.config)
+    auth = Auth(Store(cfg["paths"]["db"]), cfg)
+
+    def ask_password() -> str:
+        if args.password:
+            return args.password
+        first = getpass.getpass("密码: ")
+        if first != getpass.getpass("再输一次: "):
+            raise ValueError("两次输入不一致")
+        return first
+
+    try:
+        if args.action == "list":
+            users = auth.list_users()
+            if not users:
+                print("还没有任何账号，用 `user add <用户名> --role admin` 创建")
+                return 0
+            print("%-16s %-6s %-26s %s" % ("用户名", "角色", "订阅密钥", "最后登录"))
+            for user in users:
+                print("%-16s %-6s %-26s %s%s" % (
+                    user["username"], user["role"], user["sub_key"],
+                    human_time(user["last_login"]) if user["last_login"] else "从未",
+                    "  [已停用]" if user["disabled"] else ""))
+            return 0
+
+        if args.action == "add":
+            user = auth.create_user(args.username, ask_password(), args.role)
+            print("已创建 %s（%s）" % (user["username"], user["role"]))
+            print("订阅密钥: %s" % user["sub_key"])
+            return 0
+
+        if args.action == "passwd":
+            auth.set_password(args.username, ask_password())
+            auth.destroy_user_sessions(args.username)
+            print("已修改密码，该账号的登录状态已全部失效")
+            return 0
+
+        if args.action == "role":
+            auth.set_role(args.username, args.role)
+            print("已把 %s 的角色设为 %s" % (args.username, args.role))
+            return 0
+
+        if args.action == "disable":
+            auth.set_disabled(args.username, True)
+            print("已停用 %s" % args.username)
+            return 0
+
+        if args.action == "enable":
+            auth.set_disabled(args.username, False)
+            print("已启用 %s" % args.username)
+            return 0
+
+        if args.action == "key":
+            print("新的订阅密钥: %s" % auth.regenerate_key(args.username))
+            return 0
+
+        if args.action == "delete":
+            print("已删除 %s" % args.username if auth.delete_user(args.username)
+                  else "没有这个账号")
+            return 0
+    except (ValueError, PermissionError) as exc:
+        print("失败：%s" % exc)
+        return 1
+
+    print("未知操作")
+    return 1
+
+
 def cmd_probe(args) -> int:
     from .netclient import HttpClient
     from .probe import Prober
@@ -155,6 +228,15 @@ def main(argv=None) -> int:
     token = sub.add_parser("token", help="查看/重置管理后台令牌")
     token.add_argument("--reset", action="store_true", help="生成新令牌")
     token.set_defaults(func=cmd_token)
+
+    user = sub.add_parser("user", help="账号管理（登录认证）")
+    user.add_argument("action",
+                      choices=["add", "list", "passwd", "role", "delete", "key",
+                               "disable", "enable"])
+    user.add_argument("username", nargs="?", default="")
+    user.add_argument("--password", help="不加则交互式输入，避免留在命令历史里")
+    user.add_argument("--role", default="user", choices=["admin", "user"])
+    user.set_defaults(func=cmd_user)
 
     probe = sub.add_parser("probe", help="调试：深度探测指定链接")
     probe.add_argument("urls", nargs="+")

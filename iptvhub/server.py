@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional
 from . import export
 from .admin import AdminApi
 from .analytics import Analytics
+from .auth import COOKIE_NAME, Auth
 from .config import load_config
 from .feedback import FeedbackService
 from .netclient import HttpClient
@@ -138,7 +139,7 @@ class Updater:
 
 def make_handler(cfg: dict, cache: ChannelCache, store: Store, updater: Updater,
                  admin: AdminApi, proxy: StreamProxy, feedback: FeedbackService,
-                 analytics: Analytics):
+                 analytics: Analytics, auth: Auth):
     web_dir = cfg["paths"]["web"]
     data_dir = cfg["paths"]["data"]
     admin_token = (cfg["server"].get("admin_token") or "").strip()
@@ -157,6 +158,8 @@ def make_handler(cfg: dict, cache: ChannelCache, store: Store, updater: Updater,
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Access-Control-Allow-Origin", "*")
             self.send_header("Cache-Control", cache_control)
+            if getattr(self, "_extra_cookie", ""):
+                self.send_header("Set-Cookie", self._extra_cookie)
             for key, value in (extra or {}).items():
                 self.send_header(key, value)
             self.end_headers()
@@ -204,6 +207,8 @@ def make_handler(cfg: dict, cache: ChannelCache, store: Store, updater: Updater,
                 return
 
             try:
+                if not self._gate(path):
+                    return
                 self._track(path)
                 self._route(path, query)
             except BrokenPipeError:
@@ -361,6 +366,83 @@ def make_handler(cfg: dict, cache: ChannelCache, store: Store, updater: Updater,
                 return
             analytics.record(kind, self._client_ip(), self.headers.get("User-Agent", ""))
 
+        # ----------------------------------------------------------- 鉴权
+        def _cookie(self, name: str) -> str:
+            raw = self.headers.get("Cookie", "")
+            for part in raw.split(";"):
+                key, _, value = part.strip().partition("=")
+                if key == name:
+                    return urllib.parse.unquote(value)
+            return ""
+
+        def _user(self) -> Optional[Dict[str, Any]]:
+            """当前请求的登录用户；同一请求内只查一次。"""
+            if getattr(self, "_cached_user", "miss") != "miss":
+                return self._cached_user
+            user = auth.session_user(self._cookie(COOKIE_NAME))
+            if user is None:
+                # 播放器没法登录，允许用账号的订阅密钥访问播放列表
+                key = urllib.parse.parse_qs(
+                    urllib.parse.urlsplit(self.path).query).get("key", [""])[0]
+                if key:
+                    user = auth.user_by_key(key)
+            self._cached_user = user
+            return user
+
+        def _is_admin(self) -> bool:
+            user = self._user()
+            return bool(user and user.get("role") == "admin")
+
+        def _set_session_cookie(self, token: str, days: int) -> None:
+            parts = [
+                "%s=%s" % (COOKIE_NAME, token),
+                "Path=/",
+                "HttpOnly",
+                "SameSite=Lax",
+                "Max-Age=%d" % (days * 86400 if token else 0),
+            ]
+            if (self.headers.get("X-Forwarded-Proto", "") or "").lower() == "https":
+                parts.append("Secure")
+            self._extra_cookie = "; ".join(parts)
+
+        def _gate(self, path: str) -> bool:
+            """返回 True 表示已放行；False 表示本方法已经回过响应了。"""
+            if path in ("/login", "/healthz", "/api/login", "/api/logout", "/api/me"):
+                return True
+            if path.startswith("/static/"):
+                return True
+
+            if path.startswith("/admin") or path.startswith("/api/admin"):
+                if self._is_admin():
+                    return True
+                token = (self.headers.get("X-Admin-Token", "")
+                         or urllib.parse.parse_qs(
+                             urllib.parse.urlsplit(self.path).query).get("token", [""])[0])
+                if admin.authorized(token):      # 留给脚本/自动化用的令牌
+                    return True
+                if path.startswith("/admin"):
+                    self._redirect("/login?next=/admin")
+                else:
+                    self._json({"error": "需要管理员身份", "login": True}, 401)
+                return False
+
+            if not auth.require_login or self._user():
+                return True
+
+            if path == "/":
+                self._redirect("/login")
+            else:
+                self._json({"error": "请先登录", "login": True}, 401)
+            return False
+
+        def _redirect(self, target: str, status: int = 302) -> None:
+            self.send_response(status)
+            self.send_header("Location", target)
+            self.send_header("Content-Length", "0")
+            if getattr(self, "_extra_cookie", ""):
+                self.send_header("Set-Cookie", self._extra_cookie)
+            self.end_headers()
+
         def _client_ip(self) -> str:
             forwarded = self.headers.get("X-Forwarded-For", "")
             if forwarded:
@@ -386,6 +468,35 @@ def make_handler(cfg: dict, cache: ChannelCache, store: Store, updater: Updater,
             path = parsed.path.rstrip("/") or "/"
             query = urllib.parse.parse_qs(parsed.query)
             try:
+                if path == "/api/login":
+                    body = self._read_body()
+                    try:
+                        user = auth.authenticate(str(body.get("username") or ""),
+                                                 str(body.get("password") or ""),
+                                                 self._client_ip())
+                    except PermissionError as exc:
+                        self._json({"error": str(exc)}, 429)
+                        return
+                    if not user:
+                        self._json({"error": "用户名或密码不正确"}, 401)
+                        return
+                    token = auth.create_session(user["username"], self._client_ip(),
+                                                self.headers.get("User-Agent", ""))
+                    self._set_session_cookie(token, auth.session_days)
+                    analytics.record("login", self._client_ip(),
+                                     self.headers.get("User-Agent", ""))
+                    self._json({"user": auth.public(user)})
+                    return
+
+                if path == "/api/logout":
+                    auth.destroy_session(self._cookie(COOKIE_NAME))
+                    self._set_session_cookie("", 0)
+                    self._json({"ok": True})
+                    return
+
+                if not self._gate(path):
+                    return
+
                 if path.startswith("/api/admin"):
                     self._admin(path, query, "POST")
                     return
@@ -428,11 +539,7 @@ def make_handler(cfg: dict, cache: ChannelCache, store: Store, updater: Updater,
                 self._json({"error": str(exc)}, 500)
 
         def _admin(self, path: str, query: Dict[str, List[str]], method: str) -> None:
-            supplied = (self.headers.get("X-Admin-Token", "")
-                        or query.get("token", [""])[0])
-            if not admin.authorized(supplied):
-                self._json({"error": "unauthorized", "hint": "需要管理令牌"}, 401)
-                return
+            # 能走到这里说明 _gate 已经确认是管理员（或持有管理令牌）
             body = self._read_body() if method == "POST" else {}
             sub = path[len("/api/admin"):] or "/"
             sub = sub.rstrip("/") or "/"
@@ -443,6 +550,9 @@ def make_handler(cfg: dict, cache: ChannelCache, store: Store, updater: Updater,
         def _route(self, path: str, query: Dict[str, List[str]]) -> None:
             if path == "/":
                 self._file(os.path.join(web_dir, "index.html"))
+                return
+            if path == "/login":
+                self._file(os.path.join(web_dir, "login.html"))
                 return
             if path == "/admin":
                 self._file(os.path.join(web_dir, "admin.html"))
@@ -582,6 +692,11 @@ def make_handler(cfg: dict, cache: ChannelCache, store: Store, updater: Updater,
                             "channels": channels})
                 return
 
+            if path == "/api/me":
+                self._json({"user": auth.public(self._user()),
+                            "require_login": auth.require_login})
+                return
+
             if path == "/api/notice":
                 self._json({"notice": load_active(cfg["paths"]["config"])})
                 return
@@ -627,11 +742,14 @@ def serve(cfg: dict) -> None:
     admin = AdminApi(cfg, store, updater, cache, proxy)
     feedback = FeedbackService(store, proxy.secret)
     analytics = Analytics(store, proxy.secret)
+    auth = Auth(store, cfg)
     admin.feedback = feedback
     admin.analytics = analytics
+    admin.auth = auth
     attach_log_ring()
 
-    handler = make_handler(cfg, cache, store, updater, admin, proxy, feedback, analytics)
+    handler = make_handler(cfg, cache, store, updater, admin, proxy, feedback,
+                           analytics, auth)
     httpd = ThreadingHTTPServer((host, port), handler)
     httpd.daemon_threads = True
 
@@ -656,6 +774,7 @@ def serve(cfg: dict) -> None:
     base = "http://%s:%d" % (host if host != "0.0.0.0" else "127.0.0.1", port)
     log.info("IPTV-Hub 服务已启动: %s", base)
     token = admin.token()
+    log.info("账号数: %d（用 python3 -m iptvhub user list 查看）", auth.count())
     log.info("管理后台: %s/admin  令牌已就绪（%s，或执行 python3 -m iptvhub token 查看）",
              base, "来自 config.json" if cfg["server"].get("admin_token") else admin.token_path)
     del token
