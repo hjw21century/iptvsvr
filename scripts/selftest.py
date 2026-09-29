@@ -900,6 +900,13 @@ class TestWebAssets(unittest.TestCase):
             missing = sorted(used - defined - self.DYNAMIC_IDS)
             self.assertEqual(missing, [], "%s 引用了 %s 中不存在的 id" % (js_name, html_name))
 
+    def test_api_fields_are_actually_consumed(self):
+        """接口加了字段却忘了在前端用上——正好踩过这个坑，用例钉死。"""
+        with open(os.path.join(self.WEB, "app.js"), encoding="utf-8") as handle:
+            app_js = handle.read()
+        for field in ("guest_can_play_all", "sub_key", "direct"):
+            self.assertIn(field, app_js, "app.js 没有用到接口字段 %s" % field)
+
     def test_assets_use_relative_paths(self):
         """静态导出要能在子路径下托管，页面里不能写绝对 /static/。"""
         for _, html_name in self.PAIRS:

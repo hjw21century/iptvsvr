@@ -10,6 +10,7 @@
     pageSize: 300,
     static: false,
     user: null,
+    guestCanPlayAll: null,   // null = 还没问到服务端，按"允许"处理，最终以服务端判定为准
     shown: 0
   };
 
@@ -199,7 +200,12 @@
     return list[0] || { url: url, direct: false };
   }
 
-  function canProxy() { return !!state.user; }
+  /* 能否使用本站中转：登录用户一定可以；游客看后台的「开放游客播放全部频道」开关。
+     策略还没取到时不拦（state.guestCanPlayAll === null），让服务端去判定，
+     真不允许时 /proxy 会返回 401，播放失败的分支里会弹登录引导。 */
+  function canProxy() {
+    return !!state.user || state.guestCanPlayAll !== false;
+  }
 
   /* 游客只能播「直连」源（浏览器直接去源站拉，不花本站带宽）。
      没指定具体源时，优先替游客挑一条直连的备用源出来。 */
@@ -401,6 +407,12 @@
           }
           // 可能是中转配额用完了，去问一下真实原因
           fetch(target).then(function (r) {
+            if (r.status === 401) {          // 策略变了：中转改成要登录
+              state.guestCanPlayAll = false;
+              refreshPlayerTip();
+              needLogin(channel.name);
+              return null;
+            }
             if (r.status === 429 || r.status === 503) {
               return r.json().then(function (payload) {
                 toast(payload.error || "预览暂时不可用，请复制地址用 VLC 播放");
@@ -502,10 +514,11 @@
   function refreshPlayerTip() {
     var node = document.querySelector(".player-tip-text");
     if (!node) return;
-    node.innerHTML = state.user
-      ? "<b>网页播放仅供试看</b>（10 分钟自动暂停）。获得完整体验请用 <b>VLC</b>、" +
-        "PotPlayer、Kodi 等直播专用播放器订阅观看——直连源站，更稳、更清晰、" +
-        "可切台、支持后台播放。"
+    var common = "<b>网页播放仅供试看</b>（10 分钟自动暂停）。获得完整体验请用 <b>VLC</b>、" +
+      "PotPlayer、Kodi 等直播专用播放器订阅观看——直连源站，更稳、更清晰、" +
+      "可切台、支持后台播放。";
+    node.innerHTML = (state.user || state.guestCanPlayAll)
+      ? common
       : "<b>未登录可直接观看标「直连」的频道</b>（浏览器直接从源站拉流，不占本站带宽）；" +
         "标「中转」的频道需<a href=\"/login\">登录</a>后在网页播放。" +
         "无论是否登录，都可以复制地址或下载 m3u，用 <b>VLC</b> 等播放器观看全部频道。";
@@ -608,9 +621,12 @@
   }
 
   /* 登录信息：头部显示当前账号与退出入口 */
+  var mePromise = null;
+
   function loadMe() {
-    return fetch("/api/me").then(function (r) { return r.json(); }).then(function (data) {
+    mePromise = fetch("/api/me").then(function (r) { return r.json(); }).then(function (data) {
       state.user = data.user;
+      state.guestCanPlayAll = !!data.guest_can_play_all;
       if (!data.user) {
         el("userBox").innerHTML = '<a href="/login" class="user-chip">登录</a>';
         refreshPlayerTip();
@@ -631,6 +647,7 @@
         };
       }
     }).catch(function () { /* 未登录也不影响静态导出模式 */ });
+    return mePromise;
   }
 
   function loadStats() {
